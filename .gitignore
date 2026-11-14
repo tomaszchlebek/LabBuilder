@@ -1,0 +1,24 @@
+# Generated lab output (credentials, logs, reports)
+output/
+*.cred.xml
+lab-accounts.csv
+
+# Local tester configuration (copy of the example with real values)
+config/lab.config.psd1
+
+# Large binaries - never commit
+*.iso
+*.vhdx
+*.vhd
+*.avhdx
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+
+# Installer build output
+installer/bin/
+installer/obj/
