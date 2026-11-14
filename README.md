@@ -66,3 +66,7 @@ Import-Module Pester -RequiredVersion 3.4.0; Invoke-Pester .\tests   # unit test
 | [docs/DEVLOG.md](docs/DEVLOG.md) | Development log — every step |
 | [CHANGELOG.md](CHANGELOG.md) | Changes per version |
 | [CLAUDE.md](CLAUDE.md) | Working rules (documentation discipline, code conventions) |
+
+## License
+
+[MIT](LICENSE) - free to use, change and share, with no warranty. Windows evaluation media are subject to Microsoft's own licence terms.

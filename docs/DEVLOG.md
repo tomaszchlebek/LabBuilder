@@ -267,5 +267,13 @@ removed from the DEVLOG. Repository published publicly on GitHub (`tomaszchlebek
 **Why:** Requester asked to publish the app as version 1 in a public GitHub repository.
 **Files:** `src/LabBuilder/LabBuilder.psd1`, `CHANGELOG.md`, `README.md`, `docs/DEVLOG.md`
 **Verification:** Pester and wizard checks re-run before the commit (results in the release step); exe rebuilt as 1.0.0.
-**Not decided:** no LICENSE file — without one the public code is "all rights reserved"; add a licence if others may reuse it.
+**Licence:** MIT, added right after the release at the requester's choice (next entry).
+**Next:** Further work from the tester.
+## 2026-11-14 — MIT licence
+
+**What:** Added `LICENSE` (MIT, copyright 2026 tomaszchlebek) and a License section in the README (notes that Windows evaluation
+media keep Microsoft's own terms); CHANGELOG `[Unreleased]`.
+**Why:** Requester chose MIT so others may reuse the public code.
+**Files:** `LICENSE`, `README.md`, `CHANGELOG.md`, `docs/DEVLOG.md`
+**Verification:** GitHub licence detection checked after the push. The v1.0.0 exe is unchanged (docs only); the next build embeds the new README.
 **Next:** Further work from the tester.

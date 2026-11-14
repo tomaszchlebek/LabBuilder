@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+### Added
+- MIT licence (`LICENSE`).
+
 ## [1.0.0] — 2026-11-14
 
 First public release (GitHub: tomaszchlebek/LabBuilder). Contains all work planned as 0.2.0 plus the fixes from the first real lab runs.
