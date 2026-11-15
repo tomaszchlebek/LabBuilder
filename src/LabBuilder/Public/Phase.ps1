@@ -17,7 +17,8 @@ function Invoke-LabPhase {
         [Parameter(Mandatory)][string]$ConfigJson,
         [pscredential]$AdminCredential,
         [string]$AccountsJson = '[]',
-        [string]$IsoSource
+        [string]$IsoSource,
+        [pscredential]$SqlSaCredential
     )
 
     $ErrorActionPreference = 'Stop'
@@ -38,13 +39,17 @@ function Invoke-LabPhase {
                              Set-LabLogFile -Path (Join-Path $root ("Logs\labbuilder-{0}.log" -f (Get-Date -Format 'yyyyMMdd'))) }
         'Iso'              { if ($IsoSource) { Import-LabIso -Config $Config -Source $IsoSource }
                              $output = Save-LabIso -Config $Config -Destination (Join-Path $root 'ISO')
-                             Confirm-LabHostIso -Config $Config }
+                             Confirm-LabHostIso -Config $Config
+                             if (Test-LabSqlRequired -Config $Config) {
+                                 if ($IsoSource) { Import-LabSqlMedia -Config $Config -Source $IsoSource }
+                                 $null = Save-LabSqlMedia -Config $Config -Destination (Join-Path $root 'ISO')
+                             } }
         'BaseImages'       { New-LabBaseImage -Config $Config }
         'Network'          { New-LabNetwork -Config $Config }
         'DomainControllers' { Install-LabDomainController -Config $Config -AdminCredential $AdminCredential -AccountsJson $AccountsJson }
-        'MemberServers'    { Install-LabMemberServer -Config $Config -AdminCredential $AdminCredential }
+        'MemberServers'    { Install-LabMemberServer -Config $Config -AdminCredential $AdminCredential -SqlSaCredential $SqlSaCredential }
         'Workstations'     { Install-LabWorkstation -Config $Config -AdminCredential $AdminCredential }
-        'Validate'         { $output = Test-LabEnvironment -Config $Config -AdminCredential $AdminCredential -AccountsJson $AccountsJson }
+        'Validate'         { $output = Test-LabEnvironment -Config $Config -AdminCredential $AdminCredential -AccountsJson $AccountsJson -SqlSaCredential $SqlSaCredential }
     }
     Set-LabPhaseState -Config $Config -Phase $Name -Status 'Completed' -Seconds ([int]$sw.Elapsed.TotalSeconds)
     Write-LabLog ('=== Phase {0} completed in {1:N1} min ===' -f $Name, $sw.Elapsed.TotalMinutes) -Level OK

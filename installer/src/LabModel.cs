@@ -11,7 +11,10 @@ namespace LabBuilderSetup
 {
     public static class RoleCatalog
     {
-        public static readonly string[] All = new[] { "ADCS", "IIS", "DHCP", "FileServer" };
+        public static readonly string[] All = new[] { "ADCS", "IIS", "DHCP", "FileServer", "SQL" };
+        /// <summary>Roles allowed on domain controllers (SQL Server is not supported on a DC).</summary>
+        public static readonly string[] DomainController = new[] { "ADCS", "IIS", "DHCP", "FileServer" };
+        public static string Header(string role) { return role == "FileServer" ? "File Server" : role; }
     }
 
     public class ServerSpec
@@ -69,6 +72,14 @@ namespace LabBuilderSetup
         public int DhcpStart;
         public int DhcpEnd;
         public string ShareName;
+        // Role SQL (FR-20, ADR 0012)
+        public string SqlInstance;
+        public int SqlPort;
+        public bool SqlMixed;
+        public List<string> SqlSysadminGroups;
+        public string SqlDatabase;
+        public List<string> SqlDbOwnerGroups;
+        public string SqlCollation;
         public string IsoSource;
         public bool ConfigOnly;
 
@@ -91,6 +102,8 @@ namespace LabBuilderSetup
                 new GroupSpec("SG-Lab-HR", "Sample department group")
             };
             IisHttps = true; DhcpStart = 200; DhcpEnd = 250; ShareName = "LabShare";
+            SqlInstance = "SQLEXPRESS"; SqlPort = 1433; SqlMixed = false; SqlSysadminGroups = new List<string>();
+            SqlDatabase = "LabDB"; SqlDbOwnerGroups = new List<string> { "SG-Lab-Testers" }; SqlCollation = "";
             IsoSource = ""; ConfigOnly = false;
         }
 
@@ -151,9 +164,14 @@ namespace LabBuilderSetup
             sb.AppendLine("    Groups = @(");
             foreach (var g in Groups) sb.AppendLine("        @{ Name = " + Q(g.Name) + "; Description = " + Q(g.Description) + " }");
             sb.AppendLine("    )");
+            sb.AppendLine("    Roles = @{");
+            sb.AppendLine("        IIS        = @{ EnableHttps = " + B(IisHttps) + " }");
+            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "        DHCP       = @{{ RangeStartOctet = {0}; RangeEndOctet = {1} }}", DhcpStart, DhcpEnd));
+            sb.AppendLine("        FileServer = @{ ShareName = " + Q(ShareName) + " }");
             sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
-                "    Roles = @{{ IIS = @{{ EnableHttps = {0} }}; DHCP = @{{ RangeStartOctet = {1}; RangeEndOctet = {2} }}; FileServer = @{{ ShareName = {3} }} }}",
-                B(IisHttps), DhcpStart, DhcpEnd, Q(ShareName)));
+                "        SQL        = @{{ InstanceName = {0}; TcpPort = {1}; AuthenticationMode = {2}; SysadminGroups = {3}; DatabaseName = {4}; DbOwnerGroups = {5}; Collation = {6} }}",
+                Q(SqlInstance), SqlPort, Q(SqlMixed ? "Mixed" : "Windows"), Arr(SqlSysadminGroups), Q(SqlDatabase), Arr(SqlDbOwnerGroups), Q(SqlCollation)));
+            sb.AppendLine("    }");
             sb.AppendLine("}");
             return sb.ToString();
         }
@@ -242,6 +260,16 @@ namespace LabBuilderSetup
             s.DhcpStart = (int)L(d, "Roles.DHCP.RangeStartOctet", 200);
             s.DhcpEnd = (int)L(d, "Roles.DHCP.RangeEndOctet", 250);
             s.ShareName = S(d, "Roles.FileServer.ShareName", "LabShare");
+            s.SqlInstance = S(d, "Roles.SQL.InstanceName", s.SqlInstance);
+            s.SqlPort = (int)L(d, "Roles.SQL.TcpPort", s.SqlPort);
+            s.SqlMixed = S(d, "Roles.SQL.AuthenticationMode", "Windows") == "Mixed";
+            if (Get(d, "Roles.SQL") != null)
+            {
+                s.SqlSysadminGroups = List(Get(d, "Roles.SQL.SysadminGroups")).Select(x => Convert.ToString(x)).Where(x => !string.IsNullOrEmpty(x)).ToList();
+                s.SqlDbOwnerGroups = List(Get(d, "Roles.SQL.DbOwnerGroups")).Select(x => Convert.ToString(x)).Where(x => !string.IsNullOrEmpty(x)).ToList();
+            }
+            s.SqlDatabase = S(d, "Roles.SQL.DatabaseName", s.SqlDatabase);
+            s.SqlCollation = S(d, "Roles.SQL.Collation", s.SqlCollation);
             if (s.DomainControllers.Count == 0) s.DomainControllers.Add(new ServerSpec("DC01", 10, 2, 4, 80, "ADCS"));
             return s;
         }

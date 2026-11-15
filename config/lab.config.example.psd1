@@ -70,7 +70,8 @@
         @{ Name = 'DC01'; HostOctet = 10; ProcessorCount = 2; MemoryBytes = 4GB; DiskSizeBytes = 80GB; Roles = @('ADCS'); AdditionalFeatures = @() }
     )
 
-    # 0..10 domain-joined member servers. Roles: ADCS (max 1 in the lab), IIS, DHCP (max 1), FileServer.
+    # 0..10 domain-joined member servers. Roles: ADCS (max 1 in the lab), IIS, DHCP (max 1), FileServer,
+    # SQL (SQL Server Express, member servers only - not supported on domain controllers; settings in Roles.SQL).
     # AdditionalFeatures: any Install-WindowsFeature names.
     MemberServers = @(
         @{ Name = 'IIS01'; HostOctet = 20; ProcessorCount = 2; MemoryBytes = 4GB; DiskSizeBytes = 80GB; Roles = @('IIS'); AdditionalFeatures = @() }
@@ -116,6 +117,24 @@
         FileServer = @{
             ShareName = 'LabShare'
             Path      = 'C:\Shares\LabShare'
+        }
+        # SQL Server Express, unattended (ADR 0012). Media: the official web installer is downloaded on the host
+        # (phase Iso) and fetches the offline package SQLEXPR_x64_ENU.exe into <LabRoot>\ISO\SQL; both must be
+        # Authenticode-signed by Microsoft. The lab VMs never need internet access.
+        SQL = @{
+            Description        = 'SQL Server 2025 Express (en-US)'
+            SourcePage         = 'https://www.microsoft.com/en-us/sql-server/sql-server-downloads'
+            BootstrapperUrl    = 'https://go.microsoft.com/fwlink/p/?linkid=2216019&clcid=0x409&culture=en-us&country=us'
+            MediaType          = 'Core'            # web installer /MEDIATYPE (Core = database engine package)
+            PackagePattern     = 'SQLEXPR*.exe'    # offline package produced by the web installer
+            InstanceName       = 'SQLEXPRESS'      # MSSQLSERVER = default instance
+            TcpPort            = 1433              # static TCP port, firewall rule added
+            AuthenticationMode = 'Windows'         # Windows | Mixed (sa enabled, generated password in lab-sql.csv)
+            SysadminGroups     = @()               # lab groups made sysadmin; Domain Admins always are
+            DatabaseName       = 'LabDB'           # test database to create; '' = none
+            DbOwnerGroups      = @('SG-Lab-Testers')   # lab groups made db_owner of DatabaseName
+            Collation          = ''                # '' = SQL Setup default for the server locale
+            SetupTimeoutMinutes = 45
         }
     }
 

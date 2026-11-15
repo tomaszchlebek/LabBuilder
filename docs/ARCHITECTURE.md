@@ -17,7 +17,7 @@
  └─ Hyper-V switch "LAB-Isolated"  (Private by default; Internal if the tester chooses)   <prefix>.0/24
       ├─ DC01 .10  AD DS + DNS (forest root) [+ ADCS | IIS | DHCP | FileServer]
       ├─ DC0n .1n  AD DS + DNS (additional DC, GC) [+ roles]           (1..5 DCs)
-      ├─ SRVxx .2x member server [+ ADCS | IIS | DHCP | FileServer | extra features]   (0..10)
+      ├─ SRVxx .2x member server [+ ADCS | IIS | DHCP | FileServer | SQL | extra features]   (0..10)
       └─ WSnn .101.. Windows 11 Enterprise LTSC, domain member         (0..20)
 
  Host ──PowerShell Direct (VMBus, no network)──▶ every VM
@@ -46,6 +46,7 @@ wizard [0011](adr/0011-wizard-installer-exe.md).
 | `src/LabBuilder/Public/VM.ps1`, `Private/VMHelpers.ps1` | Dynamic disk copy/resize/partition extend, unattend + locale, VM creation; PowerShell Direct helpers |
 | `src/LabBuilder/Public/Unattend.ps1` | unattend rendering, `Resolve-LabLocale` |
 | `src/LabBuilder/Public/Roles.ps1` | Forest + additional DCs, AD content, member servers, role catalog, workstations |
+| `src/LabBuilder/Public/SqlServer.ps1` | Role SQL: media download/import with Microsoft signature check, unattended SQL Setup, port/firewall/logins/test database (ADR 0012) |
 | `src/LabBuilder/Public/Validation.ps1` | Post-build checks and report |
 | `src/LabBuilder/Public/Phase.ps1` | Phase dispatcher, state, teardown |
 | `tests/LabBuilder.Tests.ps1` | Pester unit tests |
@@ -55,13 +56,13 @@ wizard [0011](adr/0011-wizard-installer-exe.md).
 | # | Phase | What it does | Idempotency check |
 |---|-------|--------------|-------------------|
 | 1 | `Preflight` | Elevation, OS ≥ 17763, Hyper-V, DISM/Storage, `bcdboot`, vTPM cmdlets, free disk, free RAM (warn) | read-only |
-| 2 | `Iso` | Import `-IsoSource`; download missing ISOs (only images in use); verify | manifest |
+| 2 | `Iso` | Import `-IsoSource`; download missing ISOs (only images in use); verify; with role SQL: SQL Express offline package via the Microsoft web installer (signature-checked) into `ISO\SQL` | manifest; `sql-media.json` + signature |
 | 3 | `BaseImages` | 32 GB GPT base VHDX from `install.wim`; record version + language | base exists |
 | 4 | `Network` | Private/Internal switch | switch exists with type |
 | 5 | `DomainControllers` | Create all DC VMs → forest root (`Install-ADDSForest`) → OUs `Lab\{Admins,Users,Groups,Servers,Workstations}`, groups, domain admins (RID 512), test users → additional DCs (`Install-ADDSDomainController`) → DNS client order → DC roles (CA first) | DomainRole ≥ 4; AD lookups; CA `Active` value |
-| 6 | `MemberServers` | Create all → per server (CA server first): IP/DNS → join `OU=Servers` → roles ADCS → DHCP → FileServer → IIS (+HTTPS) → extra features | PartOfDomain; per-role checks |
+| 6 | `MemberServers` | Create all → per server (CA server first): IP/DNS → join `OU=Servers` → roles ADCS → DHCP → FileServer → IIS (+HTTPS) → SQL → extra features | PartOfDomain; per-role checks; SQL service exists |
 | 7 | `Workstations` | Create all → IP/DNS → join `OU=Workstations` → optional testers in local Administrators → `gpupdate` | PartOfDomain; membership |
-| 8 | `Validate` | Host: switch type, VM state, vCPU/RAM, **dynamic disk size**, adapters; DCs: domain, all DCs present, services, replication; accounts (+Domain Admins), groups, DNS; roles; workstations (LTSC, membership, local admins); client: HTTP/HTTPS per IIS, file share read, LDAP bind of a test user and a domain admin | read-only |
+| 8 | `Validate` | Host: switch type, VM state, vCPU/RAM, **dynamic disk size**, adapters; DCs: domain, all DCs present, services, replication; accounts (+Domain Admins), groups, DNS; roles; workstations (LTSC, membership, local admins); SQL servers (service, TCP, firewall, edition, auth mode, sysadmins, test database); client: HTTP/HTTPS per IIS, file share read, SQL over TCP (Windows auth, sa in Mixed mode), LDAP bind of a test user and a domain admin | read-only |
 
 ## 4. Role catalog
 
@@ -72,6 +73,7 @@ wizard [0011](adr/0011-wizard-installer-exe.md).
 | `IIS` | any | features, `/lab-health.html`, `WebServer` cert + HTTPS (if CA) | W3SVC, cert issuer, GET from client |
 | `DHCP` | 1 | authorised, scope `<prefix>.<start-end>`, DNS options | service, authorisation, scope active |
 | `FileServer` | any | `\\<server>\<share>` Change: first group, Full: Domain Admins | share exists, readable from client |
+| `SQL` | any member server (not DCs) | SQL Server 2025 Express engine, unattended; instance, static TCP port + firewall, Windows/Mixed auth, sysadmin groups, test database with `db_owner` groups and `dbo.LabCheck`, collation (ADR 0012) | service, TCP listener, edition, auth mode, sysadmins, database + row, remote query from client |
 | extra features | any | `Install-WindowsFeature` | install success |
 
 ## 5. Identity and credentials
@@ -83,7 +85,9 @@ wizard [0011](adr/0011-wizard-installer-exe.md).
 | `adm.<first>.<last>` × N | `OU=Admins`, Domain Admins | dedicated admin accounts for testers |
 | `<first>.<last>` × N | `OU=Users`, first group + random | test users |
 
-All generated passwords: `output\<LabName>\lab-accounts.csv` (ACL: current user + SYSTEM); lab admin: DPAPI `lab-admin.cred.xml`.
+| `sa` (SQL login) | SQL servers, Mixed mode only | SQL authentication tests |
+
+All generated passwords: `output\<LabName>\lab-accounts.csv` and (SQL Mixed mode) `lab-sql.csv` (ACL: current user + SYSTEM); lab admin: DPAPI `lab-admin.cred.xml`.
 The wizard passes an entered admin password to the build via **stdin** only (ADR 0011).
 
 ## 6. Requirements traceability
@@ -102,4 +106,5 @@ The wizard passes an entered admin password to the build via **stdin** only (ADR
 | FR-16 | ADR 0007, preflight |
 | FR-17 | `Resolve-LabLocale`, base image language |
 | FR-18, FR-19 | `installer/` wizard, `Test-LabConfigFile.ps1`, BaseConfig layering |
+| FR-20 | `SqlServer.ps1` (`Save-LabSqlMedia`, `Install-LabSqlServer`), `Test-LabSqlConfig`, SQL checks in `Test-LabEnvironment`, wizard page SQL Server |
 | dynamic disks (IN-6/7/12) | `New-LabVM` (copy + `Resize-VHD` + `Resize-Partition`), validation |

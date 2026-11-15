@@ -47,6 +47,11 @@ namespace LabBuilderSetup
 
         // controls
         TextBox tInstall, tLabName, tLabRoot, tFqdn, tNetBios, tPw1, tPw2, tSwitch, tPrefix, tWsPrefix, tGroups, tIsoFolder, tShare, tSummary, tLog;
+        TextBox tSqlInstance, tSqlDb, tSqlCollation;
+        NumericUpDown nSqlPort;
+        RadioButton rSqlWin, rSqlMixed;
+        CheckedListBox clSqlSys, clSqlOwners;
+        Label lblSqlState;
         RadioButton rGen, rEnter, rPrivate, rInternal, rDownload, rIsoFolder, rLocalAdminNo, rLocalAdminYes;
         NumericUpDown nDcCount, nMsCount, nWsCount, nWsOctet, nWsCpu, nWsMem, nWsDisk, nAdmins, nUsers, nPwLen, nDhcpStart, nDhcpEnd;
         DataGridView gDc, gMs;
@@ -271,6 +276,7 @@ namespace LabBuilderSetup
             pages.Add(PageDomainControllers());
             pages.Add(PageMemberServers());
             pages.Add(PageAccounts());
+            pages.Add(PageSql());
             pages.Add(PageWorkstations());
             pages.Add(PageIso());
             pages.Add(PageSummary());
@@ -282,8 +288,8 @@ namespace LabBuilderSetup
             var t = Grid();
             Note(t, "This wizard installs LabBuilder on this Hyper-V host and builds an isolated test lab: an Active Directory forest " +
                     "with domain controllers, a certificate authority, member servers with the roles you choose, and domain-joined " +
-                    "Windows 11 Enterprise LTSC workstations. Windows Server 2025 and Windows 11 evaluation ISOs are downloaded from " +
-                    "the Microsoft Evaluation Center and verified.");
+                    "Windows 11 Enterprise LTSC workstations, optionally SQL Server 2025 Express. Windows Server 2025 and Windows 11 " +
+                    "evaluation ISOs (and the SQL Server Express media) are downloaded from Microsoft and verified.");
             Heading(t, "Prerequisite check");
             lvPrereq = new ListView { View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, Width = 720, Height = 260, Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top };
             // Detail column takes the remaining width so the list fits the page at any scaling.
@@ -465,7 +471,13 @@ namespace LabBuilderSetup
             };
         }
 
-        DataGridView ServerGrid()
+        // Role columns of a grid (the DC grid has no SQL column), in grid order.
+        static IEnumerable<string> GridRoles(DataGridView g)
+        {
+            return g.Columns.Cast<DataGridViewColumn>().Where(c => c is DataGridViewCheckBoxColumn).Select(c => c.Name).ToList();
+        }
+
+        DataGridView ServerGrid(string[] roles)
         {
             var g = new DataGridView
             {
@@ -489,7 +501,7 @@ namespace LabBuilderSetup
                 new DataGridViewTextBoxColumn { Name = "Mem", HeaderText = "RAM GB" },
                 new DataGridViewTextBoxColumn { Name = "Disk", HeaderText = "Disk GB" }
             };
-            foreach (var r in RoleCatalog.All) cols.Add(new DataGridViewCheckBoxColumn { Name = r, HeaderText = r == "FileServer" ? "File Server" : r });
+            foreach (var r in roles) cols.Add(new DataGridViewCheckBoxColumn { Name = r, HeaderText = RoleCatalog.Header(r) });
             foreach (var c in cols)
             {
                 fit(c); c.SortMode = DataGridViewColumnSortMode.NotSortable;
@@ -500,7 +512,7 @@ namespace LabBuilderSetup
             g.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Features", HeaderText = "Extra Windows features (comma separated)", SortMode = DataGridViewColumnSortMode.NotSortable,
-                MinimumWidth = TextRenderer.MeasureText("Extra Windows features", g.Font).Width + pad,
+                MinimumWidth = TextRenderer.MeasureText("Extra features", g.Font).Width + pad,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill
             });
             g.CurrentCellDirtyStateChanged += (s, e) => { if (g.IsCurrentCellDirty && g.CurrentCell is DataGridViewCheckBoxCell) g.CommitEdit(DataGridViewDataErrorContexts.Commit); };
@@ -516,7 +528,7 @@ namespace LabBuilderSetup
         static void AddGridRow(DataGridView g, ServerSpec s)
         {
             var values = new List<object> { s.Name, s.HostOctet, s.Cpu, s.MemoryGB, s.DiskGB };
-            foreach (var r in RoleCatalog.All) values.Add(s.Roles.Contains(r));
+            foreach (var r in GridRoles(g)) values.Add(s.Roles.Contains(r));
             values.Add(string.Join(", ", s.Features));
             g.Rows.Add(values.ToArray());
         }
@@ -547,7 +559,7 @@ namespace LabBuilderSetup
                 if (!int.TryParse(Convert.ToString(row.Cells["Mem"].Value), out mem) || mem < 2 || mem > 512) return Fail(what + " " + name + ": RAM must be 2-512 GB.", g);
                 if (!int.TryParse(Convert.ToString(row.Cells["Disk"].Value), out disk) || disk < 40 || disk > 2048) return Fail(what + " " + name + ": disk must be 40-2048 GB (dynamic).", g);
                 var s = new ServerSpec(name.ToUpperInvariant(), octet, cpu, mem, disk);
-                foreach (var r in RoleCatalog.All) if (Convert.ToBoolean(row.Cells[r].Value ?? false)) s.Roles.Add(r);
+                foreach (var r in GridRoles(g)) if (Convert.ToBoolean(row.Cells[r].Value ?? false)) s.Roles.Add(r);
                 foreach (var f in Convert.ToString(row.Cells["Features"].Value).Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
                 {
                     if (!Regex.IsMatch(f, "^[A-Za-z0-9-]+$")) return Fail(what + " " + name + ": '" + f + "' is not a Windows feature name.", g);
@@ -565,7 +577,7 @@ namespace LabBuilderSetup
             Row(t, "Number of domain controllers", nDcCount);
             Note(t, "DC 1 creates the forest (AD DS + DNS); the others join it as additional DCs with DNS and Global Catalog. " +
                     "Tick the extra roles each DC should get. ADCS = Enterprise Root CA (one per lab). Disks are always dynamic.");
-            gDc = ServerGrid();
+            gDc = ServerGrid(RoleCatalog.DomainController);
             t.RowCount++; t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             t.Controls.Add(gDc, 0, t.RowCount - 1); t.SetColumnSpan(gDc, 2);
             nDcCount.ValueChanged += (s, e) => SyncRows(gDc, (int)nDcCount.Value, "DC", 10, null);
@@ -589,8 +601,9 @@ namespace LabBuilderSetup
             nMsCount = Num(0, 10, S.MemberServers.Count);
             Row(t, "Number of member servers", nMsCount);
             Note(t, "Domain-joined Windows Server 2025 servers in OU=Servers. Tick the roles for each server; add any other Windows " +
-                    "feature names (e.g. RSAT-AD-Tools, Telnet-Client) in the last column.");
-            gMs = ServerGrid();
+                    "feature names (e.g. RSAT-AD-Tools, Telnet-Client) in the last column. SQL = SQL Server 2025 Express, " +
+                    "installed unattended with the options on the 'SQL Server' page.");
+            gMs = ServerGrid(RoleCatalog.All);
             t.RowCount++; t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             t.Controls.Add(gMs, 0, t.RowCount - 1); t.SetColumnSpan(gMs, 2);
             nMsCount.ValueChanged += (s, e) => SyncRows(gMs, (int)nMsCount.Value, "SRV", 20, null);
@@ -670,6 +683,73 @@ namespace LabBuilderSetup
             };
         }
 
+        static void FillChecks(CheckedListBox box, IEnumerable<GroupSpec> groups, List<string> selected)
+        {
+            box.Items.Clear();
+            foreach (var g in groups) box.Items.Add(g.Name, selected.Any(x => x.Equals(g.Name, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        // Role SQL options (FR-20, ADR 0012). Placed after Accounts so the lab groups are known.
+        Page PageSql()
+        {
+            var t = Grid();
+            lblSqlState = new Label { AutoSize = true, MaximumSize = new Size(Px(720), 0), Margin = new Padding(3, 3, 3, 6), UseMnemonic = false, Font = new Font("Segoe UI Semibold", 9F) };
+            Full(t, lblSqlState);
+            Heading(t, "Product");
+            Row(t, "Edition", new Label { Text = "SQL Server 2025 Express (database engine) - downloaded from Microsoft, signature checked", AutoSize = true, Margin = new Padding(3, 7, 3, 3) });
+            Heading(t, "Instance and network");
+            tSqlInstance = Text_(S.SqlInstance, 180);
+            Row(t, "Instance name", tSqlInstance);
+            Note(t, "SQLEXPRESS (default) = named instance <server>\\SQLEXPRESS with SQL Browser; MSSQLSERVER = default instance <server>.");
+            nSqlPort = Num(1024, 65535, S.SqlPort);
+            Row(t, "Static TCP port", nSqlPort);
+            Note(t, "TCP/IP is enabled on this fixed port and the Windows firewall is opened for it (and UDP 1434 for a named instance).");
+            Heading(t, "Authentication");
+            rSqlWin = new RadioButton { Text = "Windows authentication only (recommended)", AutoSize = true, Checked = !S.SqlMixed };
+            rSqlMixed = new RadioButton { Text = "Mixed mode - Windows and SQL logins; sa gets a generated password (output\\<LabName>\\lab-sql.csv)", AutoSize = true, Checked = S.SqlMixed };
+            Full(t, rSqlWin); Full(t, rSqlMixed);
+            Heading(t, "Permissions and test database");
+            clSqlSys = new CheckedListBox { CheckOnClick = true, Width = 360, Height = 96, IntegralHeight = false };
+            Row(t, "sysadmin groups (Domain Admins always)", clSqlSys);
+            tSqlDb = Text_(S.SqlDatabase, 220);
+            Row(t, "Test database (empty = none)", tSqlDb);
+            clSqlOwners = new CheckedListBox { CheckOnClick = true, Width = 360, Height = 96, IntegralHeight = false };
+            Row(t, "db_owner groups of the test database", clSqlOwners);
+            tSqlCollation = Text_(S.SqlCollation, 260);
+            Row(t, "Server collation (empty = default)", tSqlCollation);
+            Note(t, "The test database gets a table dbo.LabCheck with one row, used by the validation. Changing the instance, authentication " +
+                    "or collation after SQL Server is installed needs the server to be rebuilt.");
+            return new Page
+            {
+                Step = "SQL Server", Title = "SQL Server Express", Subtitle = "Options for the member servers with the SQL Express role", Content = t,
+                Enter = () =>
+                {
+                    var names = S.MemberServers.Where(x => x.Roles.Contains("SQL")).Select(x => x.Name).ToList();
+                    lblSqlState.Text = names.Count == 0
+                        ? "No member server has the SQL Express role - these settings are kept but not used. Tick 'SQL' on the Member servers page to deploy SQL Server."
+                        : "SQL Server 2025 Express will be installed unattended on: " + string.Join(", ", names);
+                    lblSqlState.ForeColor = names.Count == 0 ? Color.DimGray : Color.DarkGreen;
+                    FillChecks(clSqlSys, S.Groups, S.SqlSysadminGroups);
+                    FillChecks(clSqlOwners, S.Groups, S.SqlDbOwnerGroups);
+                },
+                Leave = () =>
+                {
+                    string inst = tSqlInstance.Text.Trim(), db = tSqlDb.Text.Trim(), col = tSqlCollation.Text.Trim();
+                    if (!Regex.IsMatch(inst, @"^[A-Za-z_][A-Za-z0-9_$]{0,15}$") || inst.Equals("DEFAULT", StringComparison.OrdinalIgnoreCase))
+                        return Fail("Instance name: 1-16 letters, digits or _, starting with a letter (MSSQLSERVER = default instance).", tSqlInstance);
+                    if (db.Length > 0 && (!Regex.IsMatch(db, "^[A-Za-z][A-Za-z0-9_]{0,63}$") || new[] { "master", "model", "msdb", "tempdb" }.Contains(db.ToLowerInvariant())))
+                        return Fail("Test database: 1-64 letters, digits or _, starting with a letter, not a system database.", tSqlDb);
+                    if (col.Length > 0 && !Regex.IsMatch(col, "^[A-Za-z0-9_]{3,128}$"))
+                        return Fail("Collation: a collation name such as Latin1_General_CI_AS, or empty.", tSqlCollation);
+                    S.SqlInstance = inst; S.SqlPort = (int)nSqlPort.Value; S.SqlMixed = rSqlMixed.Checked;
+                    S.SqlSysadminGroups = clSqlSys.CheckedItems.Cast<object>().Select(x => x.ToString()).ToList();
+                    S.SqlDbOwnerGroups = clSqlOwners.CheckedItems.Cast<object>().Select(x => x.ToString()).ToList();
+                    S.SqlDatabase = db; S.SqlCollation = col;
+                    return true;
+                }
+            };
+        }
+
         Page PageWorkstations()
         {
             var t = Grid();
@@ -717,7 +797,9 @@ namespace LabBuilderSetup
             tIsoFolder = Text_(S.IsoSource, 420);
             Row(t, "Pre-downloaded ISO folder", WithBrowse(tIsoFolder, true));
             Note(t, "ISOs are stored in <lab folder>\\ISO on this host, verified (HTTPS from Microsoft hosts only, size, SHA-256) " +
-                    "and reused by later builds. Downloads resume after an interruption.");
+                    "and reused by later builds. Downloads resume after an interruption. With the SQL Express role, the SQL Server media " +
+                    "is fetched in the same step (Microsoft web installer, signature checked) into <lab folder>\\ISO\\SQL; a pre-downloaded " +
+                    "folder can hold it in a SQL subfolder (Get-LabIso.ps1 -IncludeSql).");
             EventHandler sync = (s, e) => { tIsoFolder.Enabled = rIsoFolder.Checked; };
             rDownload.CheckedChanged += sync; rIsoFolder.CheckedChanged += sync; sync(null, null);
             return new Page
@@ -777,6 +859,14 @@ namespace LabBuilderSetup
             if (S.HasRole("IIS")) sb.AppendLine("IIS                 : " + (S.IisHttps ? "HTTP + HTTPS (lab CA certificate)" : "HTTP only"));
             if (S.HasRole("DHCP")) sb.AppendLine("DHCP scope          : " + S.Prefix + "." + S.DhcpStart + " - " + S.Prefix + "." + S.DhcpEnd);
             if (S.HasRole("FileServer")) sb.AppendLine("File share          : \\\\<server>\\" + S.ShareName);
+            if (S.HasRole("SQL"))
+            {
+                sb.AppendLine("SQL Server          : 2025 Express on " + string.Join(", ", S.MemberServers.Where(x => x.Roles.Contains("SQL")).Select(x => x.Name)) +
+                    ", instance " + S.SqlInstance + ", TCP " + S.SqlPort + ", " + (S.SqlMixed ? "Mixed (sa password generated)" : "Windows authentication"));
+                sb.AppendLine("                      sysadmin: Domain Admins" + (S.SqlSysadminGroups.Count > 0 ? ", " + string.Join(", ", S.SqlSysadminGroups) : "") +
+                    (string.IsNullOrEmpty(S.SqlDatabase) ? "; no test database" : "; database " + S.SqlDatabase + " (db_owner: " + (S.SqlDbOwnerGroups.Count > 0 ? string.Join(", ", S.SqlDbOwnerGroups) : "none") + ")") +
+                    (string.IsNullOrEmpty(S.SqlCollation) ? "" : "; collation " + S.SqlCollation));
+            }
             sb.AppendLine("ISOs                : " + (string.IsNullOrEmpty(S.IsoSource) ? "download from Microsoft" : "import from " + S.IsoSource));
             sb.AppendLine();
             var ci = new Microsoft.VisualBasic.Devices.ComputerInfo();
@@ -1039,6 +1129,8 @@ namespace LabBuilderSetup
             nAdmins.Value = S.DomainAdminCount; nUsers.Value = S.TestUserCount; nPwLen.Value = Math.Max(12, Math.Min(64, S.PasswordLength));
             rLocalAdminYes.Checked = S.TestUsersLocalAdmin; rLocalAdminNo.Checked = !S.TestUsersLocalAdmin;
             tGroups.Text = string.Join(Environment.NewLine, S.Groups.Select(g => g.Name + ";" + g.Description));
+            tSqlInstance.Text = S.SqlInstance; nSqlPort.Value = Math.Max(1024, Math.Min(65535, S.SqlPort));
+            rSqlMixed.Checked = S.SqlMixed; rSqlWin.Checked = !S.SqlMixed; tSqlDb.Text = S.SqlDatabase; tSqlCollation.Text = S.SqlCollation;
             nWsCount.Value = Math.Min(20, S.WsCount); tWsPrefix.Text = S.WsPrefix; nWsOctet.Value = Math.Max(1, Math.Min(254, S.WsFirstOctet));
             nWsCpu.Value = Math.Max(2, Math.Min(64, S.WsCpu)); nWsMem.Value = Math.Max(4, Math.Min(512, S.WsMemoryGB)); nWsDisk.Value = Math.Max(64, Math.Min(2048, S.WsDiskGB));
             if (current >= 0) ShowPage(current);

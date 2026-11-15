@@ -225,12 +225,13 @@ function Install-LabDomainController {
 function Install-LabMemberServer {
     <#
     .SYNOPSIS
-        Phase MemberServers: domain-joined member servers with their catalog roles (FR-9); the CA server first.
+        Phase MemberServers: domain-joined member servers with their catalog roles (FR-9, FR-20); the CA server first.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Config,
-        [Parameter(Mandatory)][pscredential]$AdminCredential
+        [Parameter(Mandatory)][pscredential]$AdminCredential,
+        [pscredential]$SqlSaCredential
     )
 
     $servers = @(Get-LabVmDefinition -Config $Config -Role MemberServer | Sort-Object { if ($_.Roles -contains 'ADCS') { 0 } else { 1 } }, Index)
@@ -251,7 +252,7 @@ function Install-LabMemberServer {
         Join-LabVMDomain -VMName $s.VMName -LocalCredential $local -DomainCredential $domainCred -DomainFqdn $fqdn `
             -OuPath (Get-LabOuPath -Config $Config -SubOu $s.OuName) -TimeoutMinutes $timeout
         Remove-LabVMUnattend -VMName $s.VMName -Credential $local
-        Install-LabServerRole -Config $Config -Definition $s -AdminCredential $AdminCredential
+        Install-LabServerRole -Config $Config -Definition $s -AdminCredential $AdminCredential -SqlSaCredential $SqlSaCredential
         Write-LabLog "Member server $($s.Name) ready ($($s.IPAddress))." -Level OK
     }
 }
@@ -259,13 +260,14 @@ function Install-LabMemberServer {
 function Install-LabServerRole {
     <#
     .SYNOPSIS
-        Installs the catalog roles (ADCS, DHCP, FileServer, IIS - in that order) and AdditionalFeatures on one server.
+        Installs the catalog roles (ADCS, DHCP, FileServer, IIS, SQL - in that order) and AdditionalFeatures on one server.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Config,
         [Parameter(Mandatory)]$Definition,
-        [Parameter(Mandatory)][pscredential]$AdminCredential
+        [Parameter(Mandatory)][pscredential]$AdminCredential,
+        [pscredential]$SqlSaCredential
     )
     $d = $Definition
     $cred = Get-LabDomainCredential -Config $Config -AdminCredential $AdminCredential
@@ -372,6 +374,10 @@ function Install-LabServerRole {
             }
             Write-LabLog "  [$($d.Name)] HTTPS bound with certificate $thumb." -Level OK
         }
+    }
+
+    if ($d.Roles -contains 'SQL') {
+        Install-LabSqlServer -Config $Config -Definition $d -AdminCredential $AdminCredential -SaCredential $SqlSaCredential
     }
 
     if (@($d.AdditionalFeatures).Count -gt 0) {

@@ -13,6 +13,7 @@
     Output (git-ignored) in output\<LabName>\:
       lab-admin.cred.xml  lab administrator credential (DPAPI, this user on this host)
       lab-accounts.csv    generated domain admins and test users with passwords and groups
+      lab-sql.csv         SQL Server sa password (only with role SQL and Roles.SQL.AuthenticationMode = Mixed)
       build-*.log         build log; validation-*.md report; lab-summary.md
 
 .PARAMETER DomainFqdn
@@ -164,11 +165,29 @@ try {
     $accountsJson = ConvertTo-Json -InputObject @($accounts | Select-Object Type, SamAccountName, GivenName, Surname, DisplayName, UserPrincipalName, Password, Groups) -Depth 3 -Compress
     $configJson = $config | ConvertTo-Json -Depth 20 -Compress
 
+    # --- SQL Server sa password (role SQL, Mixed authentication; FR-20) - generated once, kept in lab-sql.csv ---
+    $sqlSaCred = $null
+    $sqlFile = Join-Path $outDir 'lab-sql.csv'
+    $sqlDefs = @($defs | Where-Object { $_.Roles -contains 'SQL' })
+    if ($sqlDefs.Count -gt 0 -and [string]$config.Roles.SQL.AuthenticationMode -eq 'Mixed') {
+        $saRow = $null
+        if (Test-Path -LiteralPath $sqlFile) { $saRow = @(Import-Csv -LiteralPath $sqlFile | Where-Object { $_.Login -eq 'sa' }) | Select-Object -First 1 }
+        if (-not $saRow) {
+            $saRow = [pscustomobject]@{ Login = 'sa'; Password = (New-LabPassword -Length ([math]::Max(16, [int]$config.Accounts.PasswordLength))); Servers = '' }
+            Write-LabLog "Generated the SQL Server sa password -> $sqlFile"
+        }
+        $instance = [string]$config.Roles.SQL.InstanceName
+        $saRow.Servers = (@($sqlDefs | ForEach-Object { if ($instance -ieq 'MSSQLSERVER') { "$($_.Name).$($config.Domain.Fqdn)" } else { "$($_.Name).$($config.Domain.Fqdn)\$instance" } }) -join ';')
+        $saRow | Select-Object Login, Password, Servers | Export-Csv -LiteralPath $sqlFile -NoTypeInformation -Encoding UTF8
+        Protect-LabFile -Path $sqlFile
+        $sqlSaCred = New-Object System.Management.Automation.PSCredential('sa', (ConvertTo-SecureString -String ([string]$saRow.Password) -AsPlainText -Force))
+    }
+
     # --- Phases ---
     $validation = $null
     foreach ($p in $run) {
         try {
-            $r = Invoke-LabPhase -Name $p -ConfigJson $configJson -AdminCredential $adminCred -AccountsJson $accountsJson -IsoSource $IsoSource
+            $r = Invoke-LabPhase -Name $p -ConfigJson $configJson -AdminCredential $adminCred -AccountsJson $accountsJson -IsoSource $IsoSource -SqlSaCredential $sqlSaCred
             if ($p -eq 'Validate') { $validation = $r }
         } catch {
             Write-LabLog "Phase $p failed: $($_.Exception.Message)" -Level ERROR
@@ -187,6 +206,14 @@ try {
     [void]$sb.AppendLine("- Administrator: $($config.Domain.NetBiosName)\Administrator - password: (Import-Clixml '$credFile').GetNetworkCredential().Password")
     [void]$sb.AppendLine("- Accounts ($wantAdmins domain admins, $wantUsers test users): $accFile")
     if ($config.Accounts.TestUsersAreLocalAdmins) { [void]$sb.AppendLine("- Test users ($(@($config.Groups)[0].Name)) are local administrators on the workstations") }
+    if ($sqlDefs.Count -gt 0) {
+        $sqlCfg = $config.Roles.SQL
+        $inst = [string]$sqlCfg.InstanceName
+        $targets = @($sqlDefs | ForEach-Object { if ($inst -ieq 'MSSQLSERVER') { "$($_.Name).$($config.Domain.Fqdn),$($sqlCfg.TcpPort)" } else { "$($_.Name).$($config.Domain.Fqdn)\$inst (TCP $($sqlCfg.TcpPort))" } })
+        [void]$sb.AppendLine("- SQL Server ($($sqlCfg.Description)): $($targets -join '; '); $($sqlCfg.AuthenticationMode) authentication")
+        if ([string]$sqlCfg.DatabaseName) { [void]$sb.AppendLine("  - test database $($sqlCfg.DatabaseName) (db_owner: $(@($sqlCfg.DbOwnerGroups) -join ', '))") }
+        if ($sqlSaCred) { [void]$sb.AppendLine("  - sa password: $sqlFile") }
+    }
     if ($validation) { [void]$sb.AppendLine("- Validation: $($validation.Passed) passed, $($validation.Failed) failed - $($validation.ReportPath)") }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('| VM (Hyper-V) | Computer | Type | Roles | IP | vCPU | RAM | Disk (dynamic) |')

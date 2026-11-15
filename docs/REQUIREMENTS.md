@@ -1,12 +1,13 @@
 # Requirements — Build TEST environment
 
-- **Version:** 0.3 (2026-11-14)
+- **Version:** 0.4 (2026-11-14)
 - **Owner:** project requester
-- **Status:** v0.3 — brief + clarifications + answers to the v0.2 open questions; topology and accounts chosen by the tester; Windows wizard installer
+- **Status:** v0.4 — v0.3 plus member servers with unattended SQL Server Express (release 1.1.0)
 
 History: v0.1 brief · v0.2 ISOs downloaded first on the deployment machine; runs directly on any Hyper-V host ·
 v0.3 answers (Server 2025 OK, Windows 11 **LTSC**, host language/time zone, tester decides local admin + network isolation),
-tester-defined topology/roles/sizes/accounts, `.exe` wizard installer.
+tester-defined topology/roles/sizes/accounts, `.exe` wizard installer · v0.4 (1.1.0) SQL Server Express member servers with
+tester-chosen SQL options.
 
 ## 1. Goal
 
@@ -30,7 +31,8 @@ Windows 11 clients. The tester runs a **Windows `.exe` installer wizard** on the
 | IN-10 | Security groups | 4 (`SG-Lab-*`) | editable list |
 | IN-11 | **Test users local administrators on workstations** | No | **tester decides** |
 | IN-12 | Number of **test workstations** + generic size (vCPU, RAM, disk) | 3 × (2 vCPU, 4 GB, 80 GB) | 0..20 |
-| IN-13 | Pre-downloaded ISO folder | none | optional |
+| IN-13 | Pre-downloaded ISO folder | none | optional; may contain a `SQL` subfolder with the SQL Express package |
+| IN-14 | **SQL Server options** (servers with role SQL) | instance `SQLEXPRESS`, TCP 1433, Windows auth, sysadmin: Domain Admins, database `LabDB` (db_owner `SG-Lab-Testers`), default collation | **tester decides** on the wizard page "SQL Server": instance name, TCP port, Windows/Mixed auth, sysadmin groups, test database + db_owner groups, collation |
 
 All disks are **dynamically expanding VHDX** of the size the tester chooses.
 
@@ -57,6 +59,7 @@ All disks are **dynamically expanding VHDX** of the size the tester chooses.
 | FR-17 | VMs use the **Hyper-V host's regional settings and time zone** (UI language = language of the ISO). | Must |
 | FR-18 | A **Windows `.exe` installer wizard** collects all inputs above, checks prerequisites, installs the application files, saves the configuration, runs the build with live progress and shows the result. | Must |
 | FR-19 | The configuration chosen in the wizard can be saved and loaded again (repeatable labs). | Should |
+| FR-20 | A member server can get role **SQL**: **SQL Server Express installed unattended** from Microsoft media (downloaded on the host, signature-checked), configured with the tester's SQL options (IN-14), and validated (service, TCP, auth mode, sysadmins, test database, remote connection). | Must |
 
 ## 4. Non-functional requirements
 
@@ -73,7 +76,8 @@ All disks are **dynamically expanding VHDX** of the size the tester chooses.
 ## 5. Out of scope
 
 - Internet access, routing or NAT for the lab VMs.
-- Licensing/activation — evaluation media (Server 180 days, Windows 11 LTSC 90 days).
+- Licensing/activation — evaluation media (Server 180 days, Windows 11 LTSC 90 days); SQL Server Express is free.
+- SQL Server editions other than Express, SQL Server Management Studio, SQL Agent, high availability.
 - Child domains / multiple forests, two-tier PKI.
 - Installing the software under test.
 - Code-signing the `.exe` (no certificate available; SmartScreen may warn).
@@ -90,6 +94,7 @@ All disks are **dynamically expanding VHDX** of the size the tester chooses.
 | Topology | Tester-defined DCs, member servers with role catalog, workstations, accounts | [0009](adr/0009-tester-defined-topology-and-role-catalog.md) |
 | Locale | Host regional settings + time zone; UI language from image | [0010](adr/0010-locale-from-hyper-v-host.md) |
 | Installer | .NET Framework 4.8 WinForms wizard `.exe` built with inbox `csc.exe`, payload embedded | [0011](adr/0011-wizard-installer-exe.md) |
+| SQL Server | SQL Server 2025 Express, member servers only; web installer download mode on the host, Microsoft signature check; unattended Setup from a deleted config file | [0012](adr/0012-sql-server-express-role.md) |
 
 ## 7. Answered questions (v0.2 → v0.3)
 

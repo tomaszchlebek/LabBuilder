@@ -1,4 +1,4 @@
-﻿# Runbook — building the TEST lab
+# Runbook — building the TEST lab
 
 ## 1. What you need
 
@@ -7,7 +7,7 @@
 - A local administrator account on the host and a console session there (local or RDP).
 - RAM and disk for the VMs you choose — the default lab (1 DC, 1 IIS server, 3 workstations, 4 GB each) needs **~20 GB free RAM**
   and **~150 GB free disk** (dynamic disks start at ~15 GB each and grow up to the chosen size).
-- Internet access from the host for the ISO download (~13 GB) — or pre-downloaded ISOs (§4).
+- Internet access from the host for the ISO download (~13 GB; plus ~300 MB SQL Server Express media if a server gets role SQL) — or pre-downloaded media (§4).
 - Your decisions: domain FQDN (e.g. `lab.test`, not `.local`) and NetBIOS name (≤ 15 characters), plus the topology below.
 
 ## 2. Install and build with the wizard (recommended)
@@ -23,8 +23,9 @@
 | Domain | forest FQDN, NetBIOS name, generated or entered lab administrator password |
 | Network | **isolated (Private)** or **host-reachable (Internal)** switch, switch name, /24 subnet |
 | Domain controllers | **how many (1–5)**, per DC: name, IP, **vCPU, RAM, disk (dynamic)**, extra roles (ADCS, IIS, DHCP, File Server, features) |
-| Member servers | **how many (0–10)**, per server: name, IP, size, **roles**; IIS HTTPS, DHCP range, share name |
+| Member servers | **how many (0–10)**, per server: name, IP, size, **roles** (ADCS, IIS, DHCP, File Server, **SQL**); IIS HTTPS, DHCP range, share name |
 | Accounts | **number of dedicated domain admins**, **number of test users**, password length, **test users local admins yes/no**, security groups |
+| SQL Server | for servers with role SQL (SQL Server 2025 Express): **instance name** (`SQLEXPRESS` named / `MSSQLSERVER` default), **static TCP port**, **Windows or Mixed authentication** (sa password generated), **sysadmin groups** (Domain Admins always), **test database** (or none) and its **db_owner groups**, **collation** |
 | Workstations | **how many (0–20)**, name prefix, first IP, **generic vCPU / RAM / disk (dynamic)** |
 | ISOs | download from Microsoft, or a pre-downloaded folder |
 | Summary | everything, resource totals vs host, VM regional settings (from this host); validated with the build rules |
@@ -69,7 +70,10 @@ On any Windows machine with internet access (no Hyper-V or admin rights needed):
 .\scripts\Get-LabIso.ps1 -Destination E:\LabIso
 ```
 
-Copy the folder (ISOs **and** `iso-manifest.json`) to the host and choose it on the wizard's ISO page (or `-IsoSource`).
+With SQL servers in the lab, add `-IncludeSql`: the Microsoft web installer (signature-checked) downloads the SQL Server Express
+offline package into `E:\LabIso\SQL` (nothing is installed on that machine).
+
+Copy the folder (ISOs **and** `iso-manifest.json`, plus the `SQL` subfolder) to the host and choose it on the wizard's ISO page (or `-IsoSource`).
 Every ISO is re-checked by SHA-256. Once in `<LabRoot>\ISO`, ISOs are reused by later builds.
 
 ### ISO links
@@ -78,6 +82,9 @@ Every ISO is re-checked by SHA-256. Once in `<LabRoot>\ISO`, ISOs are reused by 
 
 - Windows Server 2025 — <https://www.microsoft.com/en-us/evalcenter/download-windows-server-2025> → ISO, 64-bit, English (United States)
 - Windows 11 Enterprise **LTSC** — <https://www.microsoft.com/en-us/evalcenter/download-windows-11-enterprise> → "ISO – Enterprise LTSC download", English (United States)
+- SQL Server 2025 **Express** — <https://www.microsoft.com/en-us/sql-server/sql-server-downloads> → Express "Download now" (`Roles.SQL.BootstrapperUrl`).
+  If the automatic media download fails, run that web installer by hand → *Download Media* → *Express Core*, and put
+  `SQLEXPR_x64_ENU.exe` into `<LabRoot>\ISO\SQL` (or `<pre-download folder>\SQL`); it must be signed by Microsoft.
 
 If a download fails with *HTTP 404* or *not in Iso.AllowedDownloadHosts*, Microsoft published a new build: copy the new
 link into `config\lab.config.example.psd1` in the install folder and re-run. Set `ExpectedSha256` to pin an exact file.
@@ -90,6 +97,7 @@ link into `config\lab.config.example.psd1` in the install folder and re-run. Set
 |------|---------|
 | `lab-summary.md` | VMs, roles, IPs, sizes, where the credentials are |
 | `lab-accounts.csv` | domain admins and test users: type, user name, UPN, **password**, groups |
+| `lab-sql.csv` | SQL Server `sa` password (only with role SQL and Mixed authentication) |
 | `lab-admin.cred.xml` | lab administrator credential, encrypted for you on this host |
 | `validation-*.md` | validation report |
 | `build-*.log`, `build-*.transcript.log` | logs (no passwords) |
@@ -104,6 +112,9 @@ Lab administrator password: `(Import-Clixml .\output\TESTLAB\lab-admin.cred.xml)
 - Commands without network: `Invoke-Command -VMName TESTLAB-WS01 -Credential LABTEST\Administrator { hostname }`
 - Copy files in: `Copy-VMFile -Name TESTLAB-WS01 -SourcePath C:\pkg\app.msi -DestinationPath C:\Temp\app.msi -CreateFullPath -FileSource Host`
 - IIS: `http(s)://<server>.<domain>/lab-health.html`; file share `\\<server>\LabShare`.
+- SQL Server: `<server>.<domain>\SQLEXPRESS` (named instance, SQL Browser) or `<server>.<domain>,1433`; Windows logins of the
+  sysadmin / db_owner groups you chose; test database `LabDB` with table `dbo.LabCheck`. From PowerShell in the lab:
+  `$cn = New-Object System.Data.SqlClient.SqlConnection('Data Source=tcp:SQL01.lab.test,1433;Integrated Security=SSPI'); $cn.Open()`.
 - VM regional settings and time zone match the host; display language is the ISO language (English).
 - Checkpoint before a test run: `Get-VM TESTLAB-* | Checkpoint-VM -SnapshotName clean`.
 
@@ -117,7 +128,10 @@ Lab administrator password: `(Import-Clixml .\output\TESTLAB\lab-admin.cred.xml)
 | HTTPS certificate request fails | The build grants the IIS server's computer account Enroll on the template and restarts the CA. If it still fails (e.g. `0x80094012` with a custom `CertificateTemplate`), check the template's Security tab and that it is published on the CA, then re-run `-Phase MemberServers,Workstations,Validate`. |
 | Base image wrong edition | Adjust `ImageNamePattern`, `Remove-Lab.ps1 -IncludeBaseImages`, rebuild. |
 | Changed VM sizes after a build | Existing VMs are not resized; remove the lab (or the VM) and build again. |
-| Evaluation expired | Server 180 days, Windows 11 LTSC 90 days — remove and rebuild. |
+| SQL media download fails (phase Iso) | Read the error; download the package by hand (§4 "ISO links") into `<LabRoot>\ISO\SQL` and re-run. A file not signed by Microsoft is refused. |
+| SQL Setup fails | The error shows the exit code and the result lines of `Summary.txt` (path inside the VM in the message). Check RAM (≥ 4 GB recommended) and disk, then re-run `-Phase MemberServers,Workstations,Validate`. |
+| Changed SQL instance, authentication or collation | Not applied to an installed SQL Server — remove that VM and build again (groups, database and port are re-applied on every run). |
+| Evaluation expired | Server 180 days, Windows 11 LTSC 90 days — remove and rebuild (SQL Server Express does not expire). |
 
 ## 8. Teardown
 

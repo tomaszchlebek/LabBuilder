@@ -277,3 +277,50 @@ media keep Microsoft's own terms); CHANGELOG `[Unreleased]`.
 **Files:** `LICENSE`, `README.md`, `CHANGELOG.md`, `docs/DEVLOG.md`
 **Verification:** GitHub licence detection checked after the push. The v1.0.0 exe is unchanged (docs only); the next build embeds the new README.
 **Next:** Further work from the tester.
+
+## 2026-11-14 — Release 1.1.0: SQL Server Express member servers (FR-20)
+
+**Request:** "new version 1.1.0 - add functionality to deploy member server with automatic unattended SQL Express server - ask tester for SQL options to deploy".
+**Research:** Microsoft's SQL Server downloads page links Express "Download now" to `go.microsoft.com/fwlink/p/?linkid=2216019` →
+`aka.ms/sql2025express` → `download.microsoft.com/.../SQL2025-SSEI-Expr.exe` (4,606,792 bytes, valid Authenticode signature
+Microsoft Corporation, version 17.0.1000.9). The old SQL Server 2022 Express direct link returns HTTP 404. Decision: SQL Server 2025 Express (ADR 0012).
+**What:**
+- Config `Roles.SQL` (example config; schema stays v2, new keys come from BaseConfig) + `Test-LabSqlConfig` (member servers only, instance,
+  port, Windows/Mixed, groups must be lab groups, database name, collation, timeout); role catalog gets `SQL`.
+- `Public/SqlServer.ps1`: `Save-LabSqlMedia` (web installer via the redirect allow-list, signature check, `/ACTION=Download /MEDIATYPE=Core /QUIET`,
+  package signature check, `sql-media.json`), `Import-LabSqlMedia`, `Install-LabSqlServer` (copy over PowerShell Direct session, extract, Setup from a
+  deleted `.ini`, 3010 → restart, Summary.txt in errors; every run: static TCP port, firewall, Browser, sysadmin logins, test DB + db_owner + `dbo.LabCheck`).
+- Phase Iso fetches SQL media when a server has role SQL; MemberServers runs the SQL role after IIS; `Invoke-LabBuild.ps1` generates the `sa`
+  password once into `lab-sql.csv` (ACL-protected; not in `lab-accounts.csv`, whose rows all become AD users) and adds SQL to `lab-summary.md`.
+- Validation: in-server SQL checks and client-side TCP + Windows-auth query + `sa` login (Mixed).
+- `Get-LabIso.ps1 -IncludeSql`.
+- Wizard: role columns per grid (DC grid without SQL), SQL column on member servers, new page "SQL Server" (after Accounts so groups are known),
+  summary lines, load/save of all SQL options; `LabModel.cs` reads/writes `Roles.SQL`.
+- Version 1.1.0; docs: REQUIREMENTS v0.4 (IN-14, FR-20), ADR 0012, ARCHITECTURE, RUNBOOK, README, CHANGELOG.
+**Files:** `config/lab.config.example.psd1`, `src/LabBuilder/Public/{Config,Roles,Phase,Validation,SqlServer}.ps1`, `src/LabBuilder/LabBuilder.psd1`,
+`scripts/{Invoke-LabBuild,Get-LabIso}.ps1`, `installer/src/{LabModel,WizardForm}.cs`, `tests/LabBuilder.Tests.ps1`, docs.
+**Verification:**
+- Pester 52/52 (new: SQL config rules, SQL on DC rejected, service names, signature check accepts a Microsoft binary and rejects an unsigned file; check-block count 8).
+- Wizard model checks 28/28 (new: SQL server + Mixed + groups validates with the script rules, settings land in `Roles.SQL`, base download settings kept, round trip, payload has `SqlServer.ps1`).
+- Self-review: the validation's "LabCheck row" check counted a wrapped empty result as 1 row (PowerShell array unrolling, reproduced); now uses COUNT(*).
+- Parser + ASCII checks clean; exe built (1.1.0); DC, member server and SQL pages rendered and inspected (member grid narrowed: header "SQL", smaller features minimum).
+- **Not verified:** running the SQL web installer's download mode (blocked by this development environment's safety policy) and any SQL
+  Setup in a VM — first exercised on the tester's Hyper-V host. The download step reports how to place the package by hand if it fails.
+**Next:** Tester build with a SQL member server; record media version/SHA-256 (`ISO\SQL\sql-media.json`) and validation result; publish 1.1.0 on request.
+
+## 2026-11-15 — Tester lab run with SQL Server (1.1.0)
+
+**What:** The tester built a lab with the 1.1.0 wizard including a SQL Server Express member server on their Hyper-V host and reported "tested - all good".
+**Result:** The previously unverified steps worked on a real host: web installer download mode, offline package, unattended SQL Setup in the VM,
+post-install configuration and the SQL validation checks. FR-20 is verified by the tester's run.
+**Files:** `docs/DEVLOG.md`, `docs/adr/0012-sql-server-express-role.md` (consequence updated)
+**Next:** Publish 1.1.0 (commit, tag `v1.1.0`, GitHub release with the exe) on the requester's go-ahead.
+
+## 2026-11-15 — Publish release 1.1.0
+
+**What:** Committed the 1.1.0 work (SQL Server Express role, wizard page, validation, docs), pushed to `origin/main`, tagged `v1.1.0` and
+created the GitHub release with `LabBuilderSetup.exe` (SHA-256 930BD376...71AD05F5) attached.
+**Why:** Requester approved publishing after the successful tester run.
+**Files:** all 1.1.0 files (see the 1.1.0 entry), `docs/DEVLOG.md`
+**Verification:** release page and asset checked with `gh release view v1.1.0`.
+**Next:** Further work from the tester.

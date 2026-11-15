@@ -5,7 +5,7 @@ driven by a Windows **setup wizard (`LabBuilderSetup.exe`)** where the tester ch
 
 - **Active Directory forest** with **1–5 domain controllers** (your FQDN + NetBIOS name, DNS on every DC)
 - **Member servers** (0–10) with the **roles you tick per server**: AD CS (Enterprise Root CA), IIS (HTTPS from the lab CA),
-  DHCP, File Server — plus any extra Windows features
+  DHCP, File Server, **SQL Server 2025 Express** (unattended, with your SQL options) — plus any extra Windows features
 - **Windows 11 Enterprise LTSC workstations** (0–20), domain-joined, vTPM + Secure Boot
 - **Dedicated domain admin accounts** and **domain test users** (random names, generated passwords), security groups,
   optional local-admin rights for the testers

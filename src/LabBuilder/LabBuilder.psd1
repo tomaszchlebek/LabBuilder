@@ -1,6 +1,6 @@
 @{
     RootModule        = 'LabBuilder.psm1'
-    ModuleVersion     = '1.0.0'
+    ModuleVersion     = '1.1.0'
     GUID              = '5d0f7f0e-3c9a-4d0b-9a57-2f1d8f6b4c21'
     Author            = 'Build TEST environment project'
     Description       = 'Builds an isolated Hyper-V lab from Microsoft evaluation ISOs: AD forest with 1-5 DCs, Enterprise Root CA, member servers with selectable roles (IIS, ADCS, DHCP, File Server) and Windows 11 LTSC workstations.'
@@ -34,9 +34,16 @@
         'Test-LabEnvironment'
         'Remove-LabEnvironment'
         'Invoke-LabPhase'
+        'Test-LabSqlConfig'
+        'Test-LabSqlRequired'
+        'Save-LabSqlMedia'
+        'Import-LabSqlMedia'
+        'Install-LabSqlServer'
+        'Get-LabSqlServiceName'
+        'Test-LabMicrosoftSignature'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
     AliasesToExport   = @()
-    PrivateData       = @{ PSData = @{ Tags = @('Hyper-V', 'Lab', 'ActiveDirectory', 'ADCS', 'IIS') } }
+    PrivateData       = @{ PSData = @{ Tags = @('Hyper-V', 'Lab', 'ActiveDirectory', 'ADCS', 'IIS', 'SQLServer') } }
 }

@@ -12,15 +12,21 @@
     Download folder. Default: %USERPROFILE%\LabIsoCache.
 .PARAMETER Image
     Server, Client or both (default: both).
+.PARAMETER IncludeSql
+    Also fetch the SQL Server Express offline package into <Destination>\SQL (role SQL, ADR 0012). Runs the
+    Microsoft-signed web installer in download mode; no installation happens on this machine.
 
 .EXAMPLE
     .\scripts\Get-LabIso.ps1 -Destination E:\LabIso
+.EXAMPLE
+    .\scripts\Get-LabIso.ps1 -Destination E:\LabIso -IncludeSql
 #>
 [CmdletBinding()]
 param(
     [string]$ConfigPath,
     [string]$Destination = (Join-Path $env:USERPROFILE 'LabIsoCache'),
-    [ValidateSet('Server', 'Client')][string[]]$Image = @('Server', 'Client')
+    [ValidateSet('Server', 'Client')][string[]]$Image = @('Server', 'Client'),
+    [switch]$IncludeSql
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,5 +45,6 @@ if (-not (Test-Path -LiteralPath $Destination)) { New-Item -ItemType Directory -
 Set-LabLogFile -Clear -Path (Join-Path $Destination ("get-labiso-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss')))
 
 $entries = Save-LabIso -Config $config -Destination $Destination -Image $Image
+if ($IncludeSql) { $null = Save-LabSqlMedia -Config $config -Destination $Destination }
 $entries | Select-Object Key, FileName, @{ n = 'SizeGB'; e = { [math]::Round($_.Length / 1GB, 2) } }, Sha256 | Format-Table -AutoSize
 Write-LabLog "ISOs are in $Destination. Copy the folder to the Hyper-V host and pass it as -IsoSource, or run the build there directly." -Level OK

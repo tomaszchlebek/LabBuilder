@@ -1,4 +1,4 @@
-$script:LabRoleCatalog = @('ADCS', 'IIS', 'DHCP', 'FileServer')
+$script:LabRoleCatalog = @('ADCS', 'IIS', 'DHCP', 'FileServer', 'SQL')
 
 function Import-LabConfig {
     <#
@@ -165,6 +165,43 @@ function Get-LabRoleServer {
     return @(Get-LabVmDefinition -Config $Config -Role Server | Where-Object { $_.Roles -contains $RoleName })
 }
 
+function Test-LabSqlConfig {
+    # Rules for role SQL (ADR 0012). Returns error strings.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Config, [object[]]$Definitions = @(), [string[]]$GroupNames = @())
+    $errors = New-Object System.Collections.Generic.List[string]
+    $sqlServers = @($Definitions | Where-Object { $_.Roles -contains 'SQL' })
+    if ($sqlServers.Count -eq 0) { return $errors.ToArray() }
+    foreach ($d in @($sqlServers | Where-Object Role -eq 'DomainController')) {
+        $errors.Add("Role SQL is not supported on domain controller $($d.Name); put SQL Server on a member server.")
+    }
+    $sql = $Config.Roles.SQL
+    if (-not $sql) { $errors.Add('Roles.SQL settings are missing (see config\lab.config.example.psd1).'); return $errors.ToArray() }
+    if ([string]$sql.BootstrapperUrl -notmatch '^https://') { $errors.Add('Roles.SQL.BootstrapperUrl must be an https:// URL.') }
+    if ([string]$sql.PackagePattern -notmatch '^[A-Za-z0-9_*?.-]+\.exe$') { $errors.Add('Roles.SQL.PackagePattern must be a file pattern ending in .exe.') }
+    if ([string]$sql.MediaType -notmatch '^[A-Za-z]{1,20}$') { $errors.Add('Roles.SQL.MediaType must be a single word, e.g. Core.') }
+    $inst = [string]$sql.InstanceName
+    if ($inst -notmatch '^[A-Za-z_][A-Za-z0-9_$]{0,15}$' -or $inst.ToUpperInvariant() -eq 'DEFAULT') {
+        $errors.Add("Roles.SQL.InstanceName '$inst' must be 1-16 letters, digits or _ starting with a letter (MSSQLSERVER = default instance).")
+    }
+    $port = [int]$sql.TcpPort
+    if ($port -ne 1433 -and ($port -lt 1024 -or $port -gt 65535)) { $errors.Add('Roles.SQL.TcpPort must be 1433 or 1024-65535.') }
+    if (@('Windows', 'Mixed') -notcontains [string]$sql.AuthenticationMode) { $errors.Add("Roles.SQL.AuthenticationMode must be Windows or Mixed.") }
+    $known = @{}; foreach ($g in $GroupNames) { $known[$g.ToUpperInvariant()] = $true }
+    foreach ($key in 'SysadminGroups', 'DbOwnerGroups') {
+        foreach ($g in @($sql.$key | Where-Object { $_ })) {
+            if (-not $known.ContainsKey(([string]$g).ToUpperInvariant())) { $errors.Add("Roles.SQL.$key lists '$g', which is not one of the lab groups.") }
+        }
+    }
+    $db = [string]$sql.DatabaseName
+    if ($db -and $db -notmatch '^[A-Za-z][A-Za-z0-9_]{0,63}$') { $errors.Add("Roles.SQL.DatabaseName '$db' must be 1-64 letters, digits or _ starting with a letter (or empty).") }
+    if ($db -and @('MASTER', 'MODEL', 'MSDB', 'TEMPDB') -contains $db.ToUpperInvariant()) { $errors.Add("Roles.SQL.DatabaseName '$db' is a system database name.") }
+    if ([string]$sql.Collation -and [string]$sql.Collation -notmatch '^[A-Za-z0-9_]{3,128}$') { $errors.Add('Roles.SQL.Collation must be a collation name such as Latin1_General_CI_AS (or empty).') }
+    $t = [int]$sql.SetupTimeoutMinutes
+    if ($t -lt 10 -or $t -gt 240) { $errors.Add('Roles.SQL.SetupTimeoutMinutes must be 10-240.') }
+    return $errors.ToArray()
+}
+
 function Test-LabConfig {
     <#
     .SYNOPSIS
@@ -286,6 +323,7 @@ function Test-LabConfig {
         if ([string]$Config.Roles.FileServer.ShareName -notmatch '^[A-Za-z0-9_-]{1,80}$') { $errors.Add('Roles.FileServer.ShareName must be 1-80 letters, digits, _ or -.') }
         if ([string]$Config.Roles.FileServer.Path -notmatch '^[A-Za-z]:\\') { $errors.Add('Roles.FileServer.Path must be an absolute local path.') }
     }
+    foreach ($e in (Test-LabSqlConfig -Config $Config -Definitions $defs -GroupNames ([string[]]@($groups | ForEach-Object { [string]$_.Name })))) { $errors.Add($e) }
 
     return $errors.ToArray()
 }

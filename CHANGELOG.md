@@ -5,8 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-11-14
+
 ### Added
+- **Role SQL — SQL Server 2025 Express, unattended** on member servers (FR-20, ADR 0012): media from Microsoft's web installer
+  in download mode on the host (Authenticode signature checked, `ISO\SQL\sql-media.json`), copied into the VM over PowerShell
+  Direct, Setup from a configuration file that is deleted afterwards (no password on a command line).
+- Tester SQL options (wizard page **SQL Server**, config `Roles.SQL`): instance name, static TCP port, Windows or Mixed
+  authentication (generated `sa` password in `output\<Lab>\lab-sql.csv`), sysadmin groups, test database with `db_owner`
+  groups and table `dbo.LabCheck`, collation. Firewall rules and SQL Browser are configured automatically.
+- SQL validation: service, TCP listener, firewall, Express edition, authentication mode, sysadmins, test database, and
+  remote queries from the client (Windows authentication; `sa` in Mixed mode).
+- `scripts\Get-LabIso.ps1 -IncludeSql` pre-downloads the SQL media; `-IsoSource` imports a `SQL` subfolder.
 - MIT licence (`LICENSE`).
+
+### Changed
+- Wizard: SQL column in the member-server grid (not offered for domain controllers), new SQL Server page after Accounts,
+  SQL lines in the summary.
+
 
 ## [1.0.0] — 2026-11-14
 

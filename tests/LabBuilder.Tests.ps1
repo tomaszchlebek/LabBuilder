@@ -312,12 +312,47 @@ Describe 'New-LabUnattendXml' {
     }
 }
 
+Describe 'SQL Server role (FR-20)' {
+    function Add-Sql { param($c) $c.MemberServers += @{ Name = 'SQL01'; HostOctet = 30; ProcessorCount = 2; MemoryBytes = 4GB; DiskSizeBytes = 80GB; Roles = @('SQL'); AdditionalFeatures = @() }; $c }
+    It 'accepts the example SQL settings on a member server' {
+        $c = Add-Sql (Get-ValidConfig)
+        Get-Errors $c | Should Be ''
+        Test-LabSqlRequired -Config $c | Should Be $true
+        Test-LabSqlRequired -Config (Get-ValidConfig) | Should Be $false
+    }
+    It 'rejects SQL on a domain controller' {
+        $c = Get-ValidConfig; $c.DomainControllers[0].Roles = @('ADCS', 'SQL')
+        Get-Errors $c | Should Match 'not supported on domain controller DC01'
+    }
+    It 'checks instance, port, mode, groups, database and collation' {
+        $c = Add-Sql (Get-ValidConfig); $c.Roles.SQL.InstanceName = '1BAD'; Get-Errors $c | Should Match 'InstanceName'
+        $c = Add-Sql (Get-ValidConfig); $c.Roles.SQL.InstanceName = 'MSSQLSERVER'; Get-Errors $c | Should Be ''
+        $c = Add-Sql (Get-ValidConfig); $c.Roles.SQL.TcpPort = 80; Get-Errors $c | Should Match 'TcpPort'
+        $c = Add-Sql (Get-ValidConfig); $c.Roles.SQL.AuthenticationMode = 'SqlOnly'; Get-Errors $c | Should Match 'AuthenticationMode'
+        $c = Add-Sql (Get-ValidConfig); $c.Roles.SQL.AuthenticationMode = 'Mixed'; Get-Errors $c | Should Be ''
+        $c = Add-Sql (Get-ValidConfig); $c.Roles.SQL.SysadminGroups = @('SG-Nope'); Get-Errors $c | Should Match 'SysadminGroups lists .SG-Nope.'
+        $c = Add-Sql (Get-ValidConfig); $c.Roles.SQL.DatabaseName = 'tempdb'; Get-Errors $c | Should Match 'system database'
+        $c = Add-Sql (Get-ValidConfig); $c.Roles.SQL.DatabaseName = ''; Get-Errors $c | Should Be ''
+        $c = Add-Sql (Get-ValidConfig); $c.Roles.SQL.Collation = 'bad collation'; Get-Errors $c | Should Match 'Collation'
+    }
+    It 'derives the service name from the instance' {
+        Get-LabSqlServiceName -InstanceName 'SQLEXPRESS' | Should Be 'MSSQL$SQLEXPRESS'
+        Get-LabSqlServiceName -InstanceName 'MSSQLSERVER' | Should Be 'MSSQLSERVER'
+    }
+    It 'accepts only Microsoft-signed media' {
+        (Test-LabMicrosoftSignature -Path (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe')).Valid | Should Be $true
+        $fake = Join-Path $env:TEMP ('labbuilder-test-{0}.exe' -f [guid]::NewGuid().ToString('N'))
+        Set-Content -LiteralPath $fake -Value 'not a real package' -Encoding ASCII
+        try { (Test-LabMicrosoftSignature -Path $fake).Valid | Should Be $false } finally { Remove-Item -LiteralPath $fake -Force }
+    }
+}
+
 Describe 'Validation check blocks' {
     It 'every in-VM check block compiles once the prologue is inserted after param()' {
         $file = Join-Path $repo 'src\LabBuilder\Public\Validation.ps1'
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$null)
         $blocks = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.StringConstantType -eq 'SingleQuotedHereString' }, $true))
-        $blocks.Count | Should Be 6
+        $blocks.Count | Should Be 8
         foreach ($b in $blocks) {
             $parts = $b.Value -split "`n", 2
             $parts[0] | Should Match '^param\('

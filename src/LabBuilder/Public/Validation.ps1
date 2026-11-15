@@ -2,7 +2,7 @@ function Test-LabEnvironment {
     <#
     .SYNOPSIS
         Phase Validate (FR-12): host/VM layout and isolation, DCs and replication, accounts and groups, DNS,
-        each catalog role, workstations, client access to web/file roles, account logon.
+        each catalog role, workstations, client access to web/file/SQL roles, account logon.
         Writes <LabRoot>\Reports\validation-<timestamp>.md/.json.
     .OUTPUTS
         PSCustomObject with Passed, Failed, Results, ReportPath.
@@ -11,7 +11,8 @@ function Test-LabEnvironment {
     param(
         [Parameter(Mandatory)]$Config,
         [Parameter(Mandatory)][pscredential]$AdminCredential,
-        [Parameter(Mandatory)][string]$AccountsJson
+        [Parameter(Mandatory)][string]$AccountsJson,
+        [pscredential]$SqlSaCredential
     )
 
     $results = New-Object System.Collections.Generic.List[object]
@@ -179,6 +180,80 @@ if ($Roles -contains 'IIS') {
 return $out.ToArray()
 '@
         & $remote $s $roleCheck @(([string[]]$s.Roles), $caName, ([bool]$Config.Roles.IIS.EnableHttps), $s.IPAddress, "$($Config.Network.Prefix).0", ([string]$Config.Roles.FileServer.ShareName))
+    }
+
+    # --- SQL Server (FR-20): inside each SQL server, then over the network from the client ---
+    $sqlDefs = @($defs | Where-Object { $_.Roles -contains 'SQL' })
+    if ($sqlDefs.Count -gt 0) {
+        $sqlCfg = $Config.Roles.SQL
+        $sqlInstance = [string]$sqlCfg.InstanceName
+        $sqlPort = [int]$sqlCfg.TcpPort
+        $sqlCheck = & $newCheck @'
+param($Instance, $Svc, $Port, $NetBios, $SysadminGroups, $Database, $DbOwnerGroups, $Mixed)
+$s = Get-Service -Name $Svc -ErrorAction SilentlyContinue
+& $c "SQL Server service $Svc running" ($s -and $s.Status -eq 'Running') ''
+$listen = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+& $c "SQL Server listens on TCP $Port" ($listen.Count -gt 0) ''
+& $c "Firewall allows TCP $Port" ([bool](Get-NetFirewallRule -Name "LabBuilder-SQL-$Instance-TCP" -ErrorAction SilentlyContinue)) ''
+$server = '.'; if ($Instance -ine 'MSSQLSERVER') { $server = ".\$Instance" }
+$query = {
+    param($Text)
+    $cn = New-Object System.Data.SqlClient.SqlConnection("Data Source=$server;Integrated Security=SSPI;Initial Catalog=master;Connect Timeout=15")
+    try { $cn.Open(); $cmd = $cn.CreateCommand(); $cmd.CommandText = $Text; $r = $cmd.ExecuteReader(); $rows = @(); while ($r.Read()) { $v = @(); for ($i = 0; $i -lt $r.FieldCount; $i++) { $v += [string]$r.GetValue($i) }; $rows += ,$v }; $r.Close(); return ,$rows }
+    finally { $cn.Dispose() }
+}
+try {
+    $v = (& $query "SELECT CAST(SERVERPROPERTY('Edition') AS nvarchar(128)), CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)), CAST(SERVERPROPERTY('IsIntegratedSecurityOnly') AS int)")[0]
+    & $c 'SQL Server edition is Express' ($v[0] -like '*Express*') "$($v[0]) $($v[1])"
+    $mode = 'Windows'; if ($v[2] -eq '0') { $mode = 'Mixed' }
+    $want = 'Windows'; if ($Mixed) { $want = 'Mixed' }
+    & $c "Authentication mode $want" ($mode -eq $want) $mode
+    $sys = @((& $query "SELECT p.name FROM sys.server_role_members m JOIN sys.server_principals r ON r.principal_id = m.role_principal_id JOIN sys.server_principals p ON p.principal_id = m.member_principal_id WHERE r.name = 'sysadmin'") | ForEach-Object { $_[0] })
+    $domainSid = (New-Object System.Security.Principal.NTAccount("$NetBios\krbtgt")).Translate([System.Security.Principal.SecurityIdentifier]).AccountDomainSid
+    $admins = (New-Object System.Security.Principal.SecurityIdentifier("$($domainSid.Value)-512")).Translate([System.Security.Principal.NTAccount]).Value
+    foreach ($g in @($admins) + @($SysadminGroups | Where-Object { $_ } | ForEach-Object { "$NetBios\$_" })) {
+        & $c "$g is sysadmin" (@($sys | Where-Object { $_ -ieq $g }).Count -gt 0) ''
+    }
+    if ($Database) {
+        $db = '[' + $Database.Replace(']', ']]') + ']'
+        $n = [int]((& $query "SELECT COUNT(*) FROM $db.dbo.LabCheck WHERE Note = N'LAB-SQL-OK'")[0][0])
+        & $c "Database $Database with LabCheck row" ($n -ge 1) "$n row(s)"
+        $owners = @((& $query "SELECT p.name FROM $db.sys.database_role_members m JOIN $db.sys.database_principals r ON r.principal_id = m.role_principal_id JOIN $db.sys.database_principals p ON p.principal_id = m.member_principal_id WHERE r.name = 'db_owner'") | ForEach-Object { $_[0] })
+        foreach ($g in @($DbOwnerGroups | Where-Object { $_ })) { & $c "$NetBios\$g is db_owner of $Database" (@($owners | Where-Object { $_ -ieq "$NetBios\$g" }).Count -gt 0) '' }
+    }
+} catch { & $c 'SQL Server answers queries (Windows authentication)' $false $_.Exception.Message }
+return $out.ToArray()
+'@
+        foreach ($s in $sqlDefs) {
+            & $remote $s $sqlCheck @($sqlInstance, (Get-LabSqlServiceName -InstanceName $sqlInstance), $sqlPort, $nb,
+                ([string[]]@($sqlCfg.SysadminGroups | Where-Object { $_ })), ([string]$sqlCfg.DatabaseName),
+                ([string[]]@($sqlCfg.DbOwnerGroups | Where-Object { $_ })), ([string]$sqlCfg.AuthenticationMode -eq 'Mixed'))
+        }
+
+        $sqlNet = & $newCheck @'
+param($Hosts, $Port, $Database, $SaPassword)
+foreach ($h in @($Hosts)) {
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    $ok = $false; $d = ''
+    try { $ok = $tcp.ConnectAsync($h, $Port).Wait(10000) -and $tcp.Connected } catch { $d = $_.Exception.InnerException.Message } finally { $tcp.Close() }
+    & $c "TCP $h`:$Port reachable" $ok $d
+    $logins = @(@{ Name = 'Windows authentication (domain admin)'; Cs = "Data Source=tcp:$h,$Port;Integrated Security=SSPI;Connect Timeout=15" })
+    if ($SaPassword) { $logins += @{ Name = 'SQL authentication (sa)'; Cs = "Data Source=tcp:$h,$Port;User ID=sa;Password=$SaPassword;Connect Timeout=15" } }
+    foreach ($l in $logins) {
+        $cat = 'master'; if ($Database) { $cat = $Database }
+        $cn = New-Object System.Data.SqlClient.SqlConnection(($l.Cs + ";Initial Catalog=$cat"))
+        $ok = $false; $d = ''
+        try { $cn.Open(); $cmd = $cn.CreateCommand(); $cmd.CommandText = 'SELECT @@SERVERNAME'; $d = [string]$cmd.ExecuteScalar(); $ok = $true }
+        catch { $d = $_.Exception.Message } finally { $cn.Dispose() }
+        & $c "SQL $h`:$Port $($l.Name)" $ok $d
+    }
+}
+return $out.ToArray()
+'@
+        $saPw = ''
+        if ($SqlSaCredential -and [string]$sqlCfg.AuthenticationMode -eq 'Mixed') { $saPw = $SqlSaCredential.GetNetworkCredential().Password }
+        $sqlHosts = [string[]]@($sqlDefs | ForEach-Object { "$($_.Name).$fqdn" })
+        & $remote $client $sqlNet @($sqlHosts, $sqlPort, ([string]$sqlCfg.DatabaseName), $saPw)
     }
 
     # --- Workstations ---
