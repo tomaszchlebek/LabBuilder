@@ -31,14 +31,15 @@ function Invoke-LabLibraryLock {
     param(
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][scriptblock]$ScriptBlock,
-        [int]$TimeoutMinutes = 240
+        [int]$TimeoutMinutes = 240,
+        [switch]$Quiet   # short internal locks (VHD mount, certificate template): waiting is normal in a parallel build
     )
     $mutex = New-Object System.Threading.Mutex($false, "Global\LabBuilder-Library-$Name")
     $owned = $false
     try {
         try { $owned = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
         if (-not $owned) {
-            Write-LabLog "  another LabBuilder build is preparing library item '$Name' - waiting for it ..." -Level WARN
+            if (-not $Quiet) { Write-LabLog "  another LabBuilder build is preparing library item '$Name' - waiting for it ..." -Level WARN }
             try { $owned = $mutex.WaitOne([TimeSpan]::FromMinutes($TimeoutMinutes)) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
             if (-not $owned) { throw "Timed out after $TimeoutMinutes min waiting for library item '$Name' (held by another build)." }
         }
@@ -186,6 +187,7 @@ function Write-LabManifest {
         LibraryRoot = (Get-LabLibraryRoot -Config $Config)
         Domain      = [string]$Config.Domain.Fqdn
         Switch      = [ordered]@{ Name = [string]$Config.Network.SwitchName; Type = [string]$Config.Network.SwitchType; Prefix = [string]$Config.Network.Prefix }
+        DiskType    = (Get-LabDiskType -Config $Config)   # Differencing = VMs depend on the library base images (ADR 0014)
         CreatedUtc  = $created
         UpdatedUtc  = (Get-Date).ToUniversalTime().ToString('o')
         LastPhase   = $Phase

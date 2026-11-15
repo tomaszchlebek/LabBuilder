@@ -66,7 +66,15 @@ function Test-LabEnvironment {
         $hdd = Get-VMHardDiskDrive -VMName $d.VMName | Select-Object -First 1
         $vhd = $null; if ($hdd) { $vhd = Get-VHD -Path $hdd.Path -ErrorAction SilentlyContinue }
         $vhdDetail = 'no disk'; if ($vhd) { $vhdDetail = ('{0}, {1:N0} GB' -f $vhd.VhdType, ($vhd.Size / 1GB)) }
-        & $add 'Host' ("$($d.VMName) disk is dynamic {0:N0} GB" -f ($d.DiskSizeBytes / 1GB)) ($vhd -and [string]$vhd.VhdType -eq 'Dynamic' -and $vhd.Size -eq $d.DiskSizeBytes) $vhdDetail
+        if ((Get-LabDiskType -Config $Config) -eq 'Differencing') {
+            # Option (ADR 0014): a differencing disk is fine too if its parent (library base image) exists.
+            $parentOk = $vhd -and [string]$vhd.VhdType -eq 'Differencing' -and $vhd.ParentPath -and (Test-Path -LiteralPath $vhd.ParentPath)
+            $okType = $vhd -and ([string]$vhd.VhdType -eq 'Dynamic' -or $parentOk)
+            if ($vhd -and $vhd.ParentPath) { $vhdDetail += ", parent $($vhd.ParentPath)" }
+            & $add 'Host' ("$($d.VMName) disk is dynamic or differencing {0:N0} GB" -f ($d.DiskSizeBytes / 1GB)) ($okType -and $vhd.Size -eq $d.DiskSizeBytes) $vhdDetail
+        } else {
+            & $add 'Host' ("$($d.VMName) disk is dynamic {0:N0} GB" -f ($d.DiskSizeBytes / 1GB)) ($vhd -and [string]$vhd.VhdType -eq 'Dynamic' -and $vhd.Size -eq $d.DiskSizeBytes) $vhdDetail
+        }
         $nics = @(Get-VMNetworkAdapter -VMName $d.VMName)
         $foreign = @($nics | Where-Object { $_.SwitchName -ne $Config.Network.SwitchName })
         & $add 'Host' "$($d.VMName) adapters only on lab switch" ($nics.Count -ge 1 -and $foreign.Count -eq 0) (($nics | ForEach-Object { [string]$_.SwitchName }) -join ', ')

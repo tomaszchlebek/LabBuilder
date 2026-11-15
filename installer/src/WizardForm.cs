@@ -67,8 +67,9 @@ namespace LabBuilderSetup
         RadioButton rGen, rEnter, rPrivate, rInternal, rDownload, rIsoFolder, rLocalAdminNo, rLocalAdminYes;
         NumericUpDown nDcCount, nMsCount, nWsCount, nWsOctet, nWsCpu, nWsMem, nWsDisk, nAdmins, nUsers, nPwLen, nDhcpStart, nDhcpEnd;
         DataGridView gDc, gMs;
-        CheckBox cHttps, cConfigOnly;
-        ListView lvPrereq, lvPhases;
+        CheckBox cHttps, cConfigOnly, cParallel;
+        RadioButton rDiskDynamic, rDiskDiff;
+        ListView lvPrereq, lvPhases, lvVms;
         Label lblDisk, lblValidation, lblBuildStatus;
         Button bOpenOut, bOpenSummary, bOpenReport;
         string lastValidationOutput = "";
@@ -428,6 +429,17 @@ namespace LabBuilderSetup
             Note(t, "Shared by ALL labs on this host: the ISOs and one base image per operating system are downloaded and " +
                     "built once and reused by every later lab. Media of labs built with LabBuilder 1.0/1.1 is moved here automatically.");
             lblDisk = Note(t, "");
+            Heading(t, "Build options");
+            cParallel = new CheckBox { Text = "Build VMs in parallel (recommended - much faster; clear it to build one VM at a time)", AutoSize = true, Checked = S.Parallel };
+            Full(t, cParallel);
+            rDiskDynamic = new RadioButton { Text = "VM disks: independent dynamic copies of the base image (default)", AutoSize = true, Checked = S.DiskType != "Differencing" };
+            rDiskDiff = new RadioButton { Text = "VM disks: differencing disks on the library base images (fast, small)", AutoSize = true, Checked = S.DiskType == "Differencing" };
+            var diskGroup = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
+            diskGroup.Controls.Add(rDiskDynamic); diskGroup.Controls.Add(rDiskDiff);
+            Full(t, diskGroup);
+            Note(t, "Differencing disks are created in seconds and use a few hundred MB per VM, but every VM then depends on its base " +
+                    "image in the image library: LabBuilder never deletes or rebuilds a base image that is in use, and the library must not " +
+                    "be moved. Independent copies take ~1 minute and ~12 GB per VM and depend on nothing.");
             string lastDefaultLib = LabSettings.DefaultLibraryFor(S.LabRoot);
             tLabRoot.TextChanged += (s, e) =>
             {
@@ -456,6 +468,7 @@ namespace LabBuilderSetup
                     if (lib.StartsWith(lab, StringComparison.OrdinalIgnoreCase)) return Fail("The image library is shared by all labs - choose a folder outside the lab folder.", tLibrary);
                     S.InstallDir = tInstall.Text.TrimEnd('\\'); S.LabName = tLabName.Text; S.LabRoot = tLabRoot.Text.TrimEnd('\\');
                     S.LibraryRoot = tLibrary.Text.TrimEnd('\\');
+                    S.Parallel = cParallel.Checked; S.DiskType = rDiskDiff.Checked ? "Differencing" : "Dynamic";
                     return true;
                 }
             };
@@ -991,6 +1004,8 @@ namespace LabBuilderSetup
             sb.AppendLine("Install folder      : " + S.InstallDir);
             sb.AppendLine("Lab name / folder   : " + S.LabName + "  /  " + S.LabRoot);
             sb.AppendLine("Image library       : " + S.LibraryRoot + "  (shared by all labs)");
+            sb.AppendLine("Build               : " + (S.Parallel ? "VMs in parallel" : "one VM at a time") + "; VM disks: " +
+                (S.DiskType == "Differencing" ? "differencing disks on the library base images" : "independent dynamic copies"));
             sb.AppendLine("Domain              : " + S.Fqdn + "  (NetBIOS " + S.NetBios + ")");
             sb.AppendLine("Admin password      : " + (S.GeneratePassword ? "generated" : "entered by you"));
             sb.AppendLine("Network             : " + (S.SwitchType == "Private" ? "isolated (Private switch '" : "host-reachable (Internal switch '") + S.SwitchName + "'), " + S.Prefix + ".0/24");
@@ -1078,9 +1093,16 @@ namespace LabBuilderSetup
         Page PageBuild()
         {
             var panel = new Panel();
-            lvPhases = new ListView { Dock = DockStyle.Left, Width = 300, View = View.Details, HeaderStyle = ColumnHeaderStyle.Nonclickable, FullRowSelect = true };
-            lvPhases.Columns.Add("Phase", Px(140)); lvPhases.Columns.Add("Status", Px(150));
+            // Left column: phases (top) and a live VM status list from the build's progress events (bottom, FR-26).
+            var leftCol = new Panel { Dock = DockStyle.Left, Width = Px(330) };
+            int rowH = TextRenderer.MeasureText("Wg", Font).Height + Px(6);
+            lvPhases = new ListView { Dock = DockStyle.Top, Height = rowH * (Phases.Length + 2), View = View.Details, HeaderStyle = ColumnHeaderStyle.Nonclickable, FullRowSelect = true };
+            lvPhases.Columns.Add("Phase", Px(140)); lvPhases.Columns.Add("Status", Px(170));
             foreach (var ph in Phases) lvPhases.Items.Add(new ListViewItem(new[] { ph, "pending" }));
+            lvVms = new ListView { Dock = DockStyle.Fill, View = View.Details, HeaderStyle = ColumnHeaderStyle.Nonclickable, FullRowSelect = true, ShowItemToolTips = true };
+            lvVms.Columns.Add("VM", Px(110)); lvVms.Columns.Add("Status", Px(200));
+            var vmCaption = new Label { Text = "Virtual machines", Dock = DockStyle.Top, Height = rowH + Px(6), TextAlign = ContentAlignment.BottomLeft, Font = new Font("Segoe UI Semibold", 9F) };
+            leftCol.Controls.Add(lvVms); leftCol.Controls.Add(vmCaption); leftCol.Controls.Add(lvPhases);
             tLog = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Font = new Font("Consolas", 8.5F), BackColor = Color.FromArgb(20, 24, 30), ForeColor = Color.Gainsboro, MaxLength = 0 };
             var top = new Panel { Dock = DockStyle.Top, Height = 40 };
             lblBuildStatus = new Label { Dock = DockStyle.Fill, Font = new Font("Segoe UI Semibold", 10F), TextAlign = ContentAlignment.MiddleLeft };
@@ -1091,7 +1113,7 @@ namespace LabBuilderSetup
             buttons.Controls.Add(bOpenReport); buttons.Controls.Add(bOpenSummary); buttons.Controls.Add(bOpenOut);
             top.Controls.Add(lblBuildStatus); top.Controls.Add(buttons);
             var spacer = new Panel { Dock = DockStyle.Left, Width = 8 };
-            panel.Controls.Add(tLog); panel.Controls.Add(spacer); panel.Controls.Add(lvPhases); panel.Controls.Add(top);
+            panel.Controls.Add(tLog); panel.Controls.Add(spacer); panel.Controls.Add(leftCol); panel.Controls.Add(top);
             bOpenOut.Click += (s, e) => OpenPath(OutputDir);
             bOpenSummary.Click += (s, e) => OpenPath(Path.Combine(OutputDir, "lab-summary.md"));
             bOpenReport.Click += (s, e) =>
@@ -1186,12 +1208,36 @@ namespace LabBuilderSetup
             if (IsDisposed) return;
             BeginInvoke((Action)(() =>
             {
+                if (line.StartsWith("##LBP ")) { OnProgressEvent(line.Substring(6)); return; }   // progress event, not shown in the log
                 Log(line);
                 Match m;
                 if ((m = PhaseStart.Match(line)).Success) SetPhase(m.Groups[1].Value, "running", Color.SteelBlue);
                 else if ((m = PhaseDone.Match(line)).Success) SetPhase(m.Groups[1].Value, "done (" + m.Groups[2].Value + " min)", Color.DarkGreen);
                 else if ((m = PhaseFail.Match(line)).Success) SetPhase(m.Groups[1].Value, "FAILED", Color.Firebrick);
             }));
+        }
+
+        // ##LBP {"Time":..,"Lab":..,"Phase":..,"Item":"WEB01","Status":"roles","Detail":"IIS"} (Write-LabProgress, ADR 0014)
+        void OnProgressEvent(string json)
+        {
+            try
+            {
+                var e = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
+                string item = Convert.ToString(e.ContainsKey("Item") ? e["Item"] : "");
+                string status = Convert.ToString(e.ContainsKey("Status") ? e["Status"] : "");
+                string detail = Convert.ToString(e.ContainsKey("Detail") ? e["Detail"] : "");
+                if (string.IsNullOrEmpty(item)) return;
+                ListViewItem row = null;
+                foreach (ListViewItem it in lvVms.Items) if (it.Text == item) { row = it; break; }
+                if (row == null) { row = new ListViewItem(new[] { item, "" }); lvVms.Items.Add(row); }
+                string text = status;
+                if (!string.IsNullOrEmpty(detail) && status != "failed") text += " - " + detail;
+                row.SubItems[1].Text = text;
+                row.ToolTipText = item + ": " + status + (string.IsNullOrEmpty(detail) ? "" : " - " + detail);
+                row.ForeColor = status == "ready" ? Color.DarkGreen : status == "failed" ? Color.Firebrick : Color.SteelBlue;
+                row.EnsureVisible();
+            }
+            catch { /* a malformed event must never break the build view */ }
         }
 
         void SetPhase(string name, string status, Color color)
@@ -1275,6 +1321,7 @@ namespace LabBuilderSetup
         void RebindAll()
         {
             tInstall.Text = S.InstallDir; tLabName.Text = S.LabName; tLabRoot.Text = S.LabRoot; tLibrary.Text = S.LibraryRoot;
+            cParallel.Checked = S.Parallel; rDiskDiff.Checked = S.DiskType == "Differencing"; rDiskDynamic.Checked = !rDiskDiff.Checked;
             cbWsOs.SelectedItem = OsCatalog.Display(OsCatalog.ClientKeys.Contains(S.WsImage) ? S.WsImage : OsCatalog.DefaultClient);
             tWin10Iso.Text = S.Win10IsoPath;
             tFqdn.Text = S.Fqdn; tNetBios.Text = S.NetBios; rGen.Checked = true;

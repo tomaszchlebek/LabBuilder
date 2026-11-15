@@ -95,7 +95,7 @@ function Install-LabDomainController {
     $timeout = [int]$Config.Timeouts.VmReadyMinutes
 
     # Create all DC VMs first so their OOBE runs while the forest is built.
-    foreach ($dc in $dcs) { New-LabVM -Config $Config -Definition $dc -AdminCredential $AdminCredential }
+    New-LabVMSet -Config $Config -Definitions $dcs -AdminCredential $AdminCredential   # in parallel (ADR 0014)
 
     # --- Forest root DC ---
     $vm = $root.VMName
@@ -105,6 +105,7 @@ function Install-LabDomainController {
         Set-LabVMNetwork -VMName $vm -Credential $local -IPAddress $root.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers @($root.IPAddress)
 
         Write-LabLog "Promoting $($root.Name) to the first DC of new forest $fqdn ($nb) - 5 to 15 minutes ..." -Level STEP
+        Write-LabProgress -Config $Config -Phase 'DomainControllers' -Item $root.Name -Status 'promoting' -Detail "new forest $fqdn"
         $null = Install-LabWindowsFeature -VMName $vm -Credential $local -Name 'AD-Domain-Services' -TimeoutMinutes $timeout
         $res = Invoke-LabVMCommand -VMName $vm -Credential $local -ArgumentList $fqdn, $nb, $Config.Domain.DomainMode, $Config.Domain.ForestMode, $AdminCredential -ScriptBlock {
             param($Fqdn, $NetBios, $DomainMode, $ForestMode, $Cred)
@@ -122,6 +123,7 @@ function Install-LabDomainController {
     }
     Wait-LabADReady -Config $Config -VMName $vm -DomainCredential $domainCred
     Remove-LabVMUnattend -VMName $vm -Credential $domainCred
+    Write-LabProgress -Config $Config -Phase 'DomainControllers' -Item $root.Name -Status 'configuring' -Detail 'OUs, groups, accounts'
 
     # --- Directory content ---
     Write-LabLog 'Creating OUs, security groups, domain admin accounts and test users ...' -Level STEP
@@ -193,6 +195,7 @@ function Install-LabDomainController {
         Wait-LabVMReady -VMName $dc.VMName -Credential $local -TimeoutMinutes $timeout | Out-Null
         Set-LabVMNetwork -VMName $dc.VMName -Credential $local -IPAddress $dc.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers @($root.IPAddress)
         Write-LabLog "Promoting $($dc.Name) to an additional domain controller (DNS, GC) ..." -Level STEP
+        Write-LabProgress -Config $Config -Phase 'DomainControllers' -Item $dc.Name -Status 'promoting' -Detail 'additional DC'
         $null = Install-LabWindowsFeature -VMName $dc.VMName -Credential $local -Name 'AD-Domain-Services' -TimeoutMinutes $timeout
         $res = Invoke-LabVMCommand -VMName $dc.VMName -Credential $local -RetryCount 3 -RetryDelaySeconds 60 -ArgumentList $fqdn, $domainCred, $AdminCredential -ScriptBlock {
             param($Fqdn, $DomainCred, $Dsrm)
@@ -219,7 +222,11 @@ function Install-LabDomainController {
 
     # --- Catalog roles on DCs (CA first) ---
     foreach ($dc in ($dcs | Sort-Object { if ($_.Roles -contains 'ADCS') { 0 } else { 1 } }, Index)) {
+        if (@($dc.Roles + $dc.AdditionalFeatures | Where-Object { $_ }).Count -gt 0) {
+            Write-LabProgress -Config $Config -Phase 'DomainControllers' -Item $dc.Name -Status 'roles' -Detail (@($dc.Roles + $dc.AdditionalFeatures) -join ', ')
+        }
         Install-LabServerRole -Config $Config -Definition $dc -AdminCredential $AdminCredential
+        Write-LabProgress -Config $Config -Phase 'DomainControllers' -Item $dc.Name -Status 'ready' -Detail $dc.IPAddress
     }
 }
 
@@ -239,22 +246,48 @@ function Install-LabMemberServer {
     if ($servers.Count -eq 0) { Write-LabLog 'No member servers configured.' -Level OK; return }
     Assert-LabDomainControllerRunning -Config $Config
 
+    # All VMs are created at once; the CA servers are configured first (HTTPS certificates of the others need the CA),
+    # then all other servers in parallel (ADR 0014).
+    New-LabVMSet -Config $Config -Definitions $servers -AdminCredential $AdminCredential
+    $first = @($servers | Where-Object { $_.Roles -contains 'ADCS' })
+    $rest = @($servers | Where-Object { $_.Roles -notcontains 'ADCS' })
+    foreach ($group in @(@{ Items = $first; Throttle = 1 }, @{ Items = $rest; Throttle = (Get-LabThrottleLimit -Config $Config -Count $rest.Count) })) {
+        if (@($group.Items).Count -eq 0) { continue }
+        $null = Invoke-LabParallel -Items $group.Items -Label { param($d) $d.Name } -What 'member servers' -ThrottleLimit $group.Throttle `
+            -Sequential:(-not (Test-LabParallelEnabled -Config $Config)) -LogFolder (Join-Path ([string]$Config.Paths.LabRoot) 'Logs') `
+            -Arguments @{ Config = $Config; Cred = $AdminCredential; Sa = $SqlSaCredential } -ScriptBlock {
+                param($Item, $A)
+                Initialize-LabMemberServer -Config $A.Config -Definition $Item -AdminCredential $A.Cred -SqlSaCredential $A.Sa
+            }
+    }
+}
+
+function Initialize-LabMemberServer {
+    # One member server: network, domain join, roles (FR-9). Idempotent; runs in a parallel worker (ADR 0014).
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][pscredential]$AdminCredential, [pscredential]$SqlSaCredential)
+    $s = $Definition
     $fqdn = [string]$Config.Domain.Fqdn
     $domainCred = Get-LabDomainCredential -Config $Config -AdminCredential $AdminCredential
     $timeout = [int]$Config.Timeouts.VmReadyMinutes
-    $dns = Get-LabDcIPs -Config $Config
-
-    foreach ($s in $servers) { New-LabVM -Config $Config -Definition $s -AdminCredential $AdminCredential }
-    foreach ($s in $servers) {
+    try {
         Write-LabLog "Configuring member server $($s.Name) (roles: $(@($s.Roles + $s.AdditionalFeatures) -join ', ')) ..." -Level STEP
+        Write-LabProgress -Config $Config -Phase 'MemberServers' -Item $s.Name -Status 'configuring'
         $local = Get-LabLocalCredential -Definition $s -AdminCredential $AdminCredential
         Wait-LabVMReady -VMName $s.VMName -Credential $local -TimeoutMinutes $timeout | Out-Null
-        Set-LabVMNetwork -VMName $s.VMName -Credential $local -IPAddress $s.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers $dns
+        Set-LabVMNetwork -VMName $s.VMName -Credential $local -IPAddress $s.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers (Get-LabDcIPs -Config $Config)
+        Write-LabProgress -Config $Config -Phase 'MemberServers' -Item $s.Name -Status 'joining' -Detail $fqdn
         Join-LabVMDomain -VMName $s.VMName -LocalCredential $local -DomainCredential $domainCred -DomainFqdn $fqdn `
             -OuPath (Get-LabOuPath -Config $Config -SubOu $s.OuName) -TimeoutMinutes $timeout
         Remove-LabVMUnattend -VMName $s.VMName -Credential $local
+        if (@($s.Roles + $s.AdditionalFeatures | Where-Object { $_ }).Count -gt 0) {
+            Write-LabProgress -Config $Config -Phase 'MemberServers' -Item $s.Name -Status 'roles' -Detail (@($s.Roles + $s.AdditionalFeatures) -join ', ')
+        }
         Install-LabServerRole -Config $Config -Definition $s -AdminCredential $AdminCredential -SqlSaCredential $SqlSaCredential
         Write-LabLog "Member server $($s.Name) ready ($($s.IPAddress))." -Level OK
+        Write-LabProgress -Config $Config -Phase 'MemberServers' -Item $s.Name -Status 'ready' -Detail $s.IPAddress
+    } catch {
+        Write-LabProgress -Config $Config -Phase 'MemberServers' -Item $s.Name -Status 'failed' -Detail $_.Exception.Message
+        throw
     }
 }
 
@@ -347,8 +380,11 @@ function Install-LabServerRole {
         Write-LabLog "  [$($d.Name)] IIS installed; health page /lab-health.html." -Level OK
 
         if ($Config.Roles.IIS.EnableHttps) {
-            Grant-LabCertificateTemplateEnroll -Config $Config -AdminCredential $AdminCredential `
-                -TemplateName ([string]$Config.Roles.IIS.CertificateTemplate) -ComputerName $d.Name
+            # One template ACL change + CertSvc restart at a time: parallel IIS servers would overwrite each other's ACE (ADR 0014).
+            Invoke-LabLibraryLock -Name 'CertTemplate' -TimeoutMinutes 30 -Quiet -ScriptBlock {
+                Grant-LabCertificateTemplateEnroll -Config $Config -AdminCredential $AdminCredential `
+                    -TemplateName ([string]$Config.Roles.IIS.CertificateTemplate) -ComputerName $d.Name
+            }
             Write-LabLog "  [$($d.Name)] requesting '$($Config.Roles.IIS.CertificateTemplate)' certificate from the lab CA, binding HTTPS ..." -Level STEP
             $thumb = Invoke-LabVMCommand -VMName $d.VMName -Credential $cred -RetryCount 5 -RetryDelaySeconds 30 -ArgumentList "$($d.Name).$fqdn", $d.Name, ([string]$Config.Roles.IIS.CertificateTemplate) -ScriptBlock {
                 param($HostFqdn, $Short, $Template)
@@ -400,22 +436,33 @@ function Install-LabWorkstation {
     if ($defs.Count -eq 0) { Write-LabLog 'No workstations configured.' -Level OK; return }
     Assert-LabDomainControllerRunning -Config $Config
 
+    # Create all, then configure all in parallel (ADR 0014).
+    New-LabVMSet -Config $Config -Definitions $defs -AdminCredential $AdminCredential
+    $null = Invoke-LabParallel -Items $defs -Label { param($d) $d.Name } -What 'workstations' `
+        -ThrottleLimit (Get-LabThrottleLimit -Config $Config -Count $defs.Count) -Sequential:(-not (Test-LabParallelEnabled -Config $Config)) `
+        -LogFolder (Join-Path ([string]$Config.Paths.LabRoot) 'Logs') -Arguments @{ Config = $Config; Cred = $AdminCredential } -ScriptBlock {
+            param($Item, $A)
+            Initialize-LabWorkstation -Config $A.Config -Definition $Item -AdminCredential $A.Cred
+        }
+}
+
+function Initialize-LabWorkstation {
+    # One workstation: network, domain join, optional testers in local Administrators (FR-11). Idempotent; parallel worker (ADR 0014).
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][pscredential]$AdminCredential)
+    $def = $Definition
     $fqdn = [string]$Config.Domain.Fqdn
     $nb = [string]$Config.Domain.NetBiosName
     $domainCred = Get-LabDomainCredential -Config $Config -AdminCredential $AdminCredential
     $timeout = [int]$Config.Timeouts.VmReadyMinutes
-    $dns = Get-LabDcIPs -Config $Config
     $adminGroups = @()
     if ($Config.Accounts.TestUsersAreLocalAdmins) { $adminGroups = @([string](@($Config.Groups)[0].Name)) }
-
-    # Create and start all first so their OOBE runs in parallel.
-    foreach ($def in $defs) { New-LabVM -Config $Config -Definition $def -AdminCredential $AdminCredential }
-
-    foreach ($def in $defs) {
+    try {
         Write-LabLog "Configuring workstation $($def.Name) ..." -Level STEP
+        Write-LabProgress -Config $Config -Phase 'Workstations' -Item $def.Name -Status 'configuring'
         $local = Get-LabLocalCredential -Definition $def -AdminCredential $AdminCredential
         Wait-LabVMReady -VMName $def.VMName -Credential $local -TimeoutMinutes $timeout | Out-Null
-        Set-LabVMNetwork -VMName $def.VMName -Credential $local -IPAddress $def.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers $dns
+        Set-LabVMNetwork -VMName $def.VMName -Credential $local -IPAddress $def.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers (Get-LabDcIPs -Config $Config)
+        Write-LabProgress -Config $Config -Phase 'Workstations' -Item $def.Name -Status 'joining' -Detail $fqdn
         Join-LabVMDomain -VMName $def.VMName -LocalCredential $local -DomainCredential $domainCred -DomainFqdn $fqdn `
             -OuPath (Get-LabOuPath -Config $Config -SubOu $def.OuName) -TimeoutMinutes $timeout
         Remove-LabVMUnattend -VMName $def.VMName -Credential $local
@@ -431,6 +478,10 @@ function Install-LabWorkstation {
         } | Out-Null
         if ($adminGroups.Count -gt 0) { Write-LabLog "  $($def.Name): $nb\$($adminGroups[0]) added to local Administrators." }
         Write-LabLog "Workstation $($def.Name) ready ($($def.IPAddress))." -Level OK
+        Write-LabProgress -Config $Config -Phase 'Workstations' -Item $def.Name -Status 'ready' -Detail $def.IPAddress
+    } catch {
+        Write-LabProgress -Config $Config -Phase 'Workstations' -Item $def.Name -Status 'failed' -Detail $_.Exception.Message
+        throw
     }
 }
 

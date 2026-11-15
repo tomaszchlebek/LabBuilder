@@ -286,6 +286,11 @@ function Test-LabConfig {
     if ([int]$Config.Workstations.FirstHostOctet + $wsCount - 1 -gt 254) { $errors.Add('Workstations.FirstHostOctet + Count - 1 must be <= 254.') }
     $base = [int64]$Config.BaseDiskSizeBytes
     if ($base -lt 32GB) { $errors.Add('BaseDiskSizeBytes must be >= 32GB.') }
+    if ($Config.Disks -and @('Dynamic', 'Differencing') -notcontains [string]$Config.Disks.Type) { $errors.Add("Disks.Type must be Dynamic or Differencing.") }
+    if ($Config.Build -and $Config.Build.PSObject.Properties['ThrottleLimit']) {
+        $tl = [int]$Config.Build.ThrottleLimit
+        if ($tl -lt 0 -or $tl -gt 32) { $errors.Add('Build.ThrottleLimit must be 0 (auto) to 32.') }
+    }
 
     $defs = @()
     try { $defs = @(Get-LabVmDefinition -Config $Config) } catch { $errors.Add("Topology is invalid: $($_.Exception.Message)") }

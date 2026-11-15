@@ -79,6 +79,8 @@ namespace LabBuilderSetup
         public string LibraryRoot;     // shared image library (ADR 0013)
         public string WsImage;         // Win11LTSC | Win10
         public string Win10IsoPath;    // tester-supplied Windows 10 ISO (Iso.Images.Win10.SourcePath)
+        public bool Parallel;          // Build.Parallel (ADR 0014)
+        public string DiskType;        // Disks.Type: Dynamic | Differencing (ADR 0014, decision D5)
         public string Fqdn;
         public string NetBios;
         public bool GeneratePassword;
@@ -121,6 +123,7 @@ namespace LabBuilderSetup
             LabRoot = Directory.Exists(@"D:\") ? @"D:\HyperVLab" : @"C:\HyperVLab";
             LibraryRoot = DefaultLibraryFor(LabRoot);
             WsImage = OsCatalog.DefaultClient; Win10IsoPath = "";
+            Parallel = true; DiskType = "Dynamic";
             Fqdn = ""; NetBios = "";
             GeneratePassword = true; AdminPassword = "";
             SwitchType = "Private"; SwitchName = "LAB-Isolated"; Prefix = "10.10.10";
@@ -196,6 +199,8 @@ namespace LabBuilderSetup
             sb.AppendLine("    Paths   = @{ LabRoot = " + Q(LabRoot) + "; LibraryRoot = " + Q(LibraryRoot) + " }");
             if (!string.IsNullOrEmpty(Win10IsoPath))
                 sb.AppendLine("    Iso     = @{ Images = @{ Win10 = @{ SourcePath = " + Q(Win10IsoPath) + " } } }");
+            sb.AppendLine("    Disks   = @{ Type = " + Q(DiskType == "Differencing" ? "Differencing" : "Dynamic") + " }");
+            sb.AppendLine("    Build   = @{ Parallel = " + B(Parallel) + " }");
             sb.AppendLine("    Domain  = @{ Fqdn = " + Q(Fqdn.ToLowerInvariant()) + "; NetBiosName = " + Q(NetBios.ToUpperInvariant()) + " }");
             sb.AppendLine("    Network = @{ SwitchName = " + Q(SwitchName) + "; SwitchType = " + Q(SwitchType) + "; Prefix = " + Q(Prefix) + " }");
             sb.AppendLine("    DomainControllers = @(");
@@ -290,6 +295,8 @@ namespace LabBuilderSetup
             if (string.IsNullOrEmpty(s.LibraryRoot)) s.LibraryRoot = DefaultLibraryFor(s.LabRoot);
             s.WsImage = S(d, "Workstations.Image", OsCatalog.DefaultClient);
             s.Win10IsoPath = S(d, "Iso.Images.Win10.SourcePath", "");
+            s.Parallel = Bo(d, "Build.Parallel", true);
+            s.DiskType = S(d, "Disks.Type", "Dynamic") == "Differencing" ? "Differencing" : "Dynamic";
             s.Fqdn = S(d, "Domain.Fqdn", "");
             s.NetBios = S(d, "Domain.NetBiosName", "");
             s.SwitchType = S(d, "Network.SwitchType", s.SwitchType);

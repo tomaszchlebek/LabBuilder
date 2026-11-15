@@ -41,7 +41,14 @@ function Invoke-LabPhase {
                              $lib = Get-LabLibraryIsoFolder -Config $Config
                              Move-LabLegacyMedia -Config $Config
                              if ($IsoSource) { Import-LabIso -Config $Config -Source $IsoSource }
-                             $output = Save-LabIso -Config $Config -Destination $lib -ImportSupplied
+                             # One worker per ISO - downloads/imports run in parallel (ADR 0014); library locks still apply.
+                             $keys = @(Get-LabRequiredImageKey -Config $Config)
+                             $output = Invoke-LabParallel -Items $keys -Label { param($k) "ISO $k" } -What 'ISOs' `
+                                 -ThrottleLimit (Get-LabThrottleLimit -Config $Config -Count $keys.Count -Max 4) -Sequential:(-not (Test-LabParallelEnabled -Config $Config)) `
+                                 -Arguments @{ Config = $Config; Lib = $lib } -ScriptBlock {
+                                     param($Item, $A)
+                                     Save-LabIso -Config $A.Config -Destination $A.Lib -Image $Item -ImportSupplied
+                                 }
                              Confirm-LabHostIso -Config $Config
                              if (Test-LabSqlRequired -Config $Config) {
                                  Invoke-LabLibraryLock -Name 'SQL' -ScriptBlock {
@@ -124,7 +131,10 @@ function Remove-LabEnvironment {
         foreach ($key in (Get-LabRequiredImageKey -Config $Config)) {
             Invoke-LabLibraryLock -Name "Base-$key" -ScriptBlock {
                 $vhd = Get-LabBaseImagePath -Config $Config -Image $key
-                if ((Test-Path -LiteralPath $vhd) -and $cmdlet.ShouldProcess($vhd, 'Delete base image from the shared library')) {
+                $users = @(Get-LabBaseImageUser -Path $vhd)   # differencing disks of other labs (this lab's VMs are gone by now)
+                if ($users.Count -gt 0) {
+                    Write-LabLog "  base image $vhd kept - differencing disks of $($users -join ', ') use it (ADR 0014)." -Level WARN
+                } elseif ((Test-Path -LiteralPath $vhd) -and $cmdlet.ShouldProcess($vhd, 'Delete base image from the shared library')) {
                     Set-ItemProperty -LiteralPath $vhd -Name IsReadOnly -Value $false
                     Remove-Item -LiteralPath $vhd, "$vhd.json" -Force -ErrorAction SilentlyContinue
                     Write-LabLog "  removed base image $vhd"

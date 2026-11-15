@@ -29,7 +29,8 @@ base image [0004](adr/0004-vm-build-from-base-vhdx.md), dynamic disks [0008](adr
 network [0005](adr/0005-isolated-private-network.md), secrets [0006](adr/0006-lab-secrets-handling.md),
 topology and roles [0009](adr/0009-tester-defined-topology-and-role-catalog.md), locale [0010](adr/0010-locale-from-hyper-v-host.md),
 wizard [0011](adr/0011-wizard-installer-exe.md), SQL Server [0012](adr/0012-sql-server-express-role.md),
-image library + OS choice + lab manifest [0013](adr/0013-shared-image-library-and-os-choice.md).
+image library + OS choice + lab manifest [0013](adr/0013-shared-image-library-and-os-choice.md),
+parallel build + differencing disks + progress [0014](adr/0014-parallel-build-differencing-disks-progress.md).
 
 ## 2. Components
 
@@ -48,6 +49,7 @@ image library + OS choice + lab manifest [0013](adr/0013-shared-image-library-an
 | `src/LabBuilder/Public/Iso.ps1`, `Private/Download.ps1` | Download, import, manifest, verification |
 | `src/LabBuilder/Public/HostSetup.ps1` | Preflight, base VHDX per OS in the library (+ image language, ISO hash, 1.0/1.1 adoption), switch |
 | `src/LabBuilder/Public/Library.ps1` | Image library root, host-wide named-mutex lock per item, 1.0/1.1 media migration, tester-supplied ISO import, `lab.json` manifest, VM note tag (ADR 0013) |
+| `src/LabBuilder/Private/Parallel.ps1` | `Invoke-LabParallel` (runspace pool, module-bound script blocks, live relay of host output/warnings, per-item logs, error summary), throttle and on/off from `Build.*` (ADR 0014) |
 | `src/LabBuilder/Public/VM.ps1`, `Private/VMHelpers.ps1` | Dynamic disk copy/resize/partition extend, unattend + locale, VM creation; PowerShell Direct helpers |
 | `src/LabBuilder/Public/Unattend.ps1` | unattend rendering, `Resolve-LabLocale` |
 | `src/LabBuilder/Public/Roles.ps1` | Forest + additional DCs, AD content, member servers, role catalog, workstations |
@@ -64,9 +66,9 @@ image library + OS choice + lab manifest [0013](adr/0013-shared-image-library-an
 | 2 | `Iso` | Move 1.0/1.1 media from `<LabRoot>\ISO` into the library; import `-IsoSource`; download missing ISOs of the OSes in use; copy the tester's Windows 10 ISO; verify; with role SQL: SQL Express offline package via the Microsoft web installer (signature-checked) into `<Library>\ISO\SQL` — each item under a host-wide lock | manifest; `sql-media.json` + signature |
 | 3 | `BaseImages` | Per OS in use: adopt a 1.0/1.1 base of this lab, else keep the library base, else build a 32 GB GPT base VHDX from `install.wim`; record version, language, ISO SHA-256; rebuild if the ISO changed — under a host-wide lock | base exists + ISO hash |
 | 4 | `Network` | Private/Internal switch | switch exists with type |
-| 5 | `DomainControllers` | Create all DC VMs → forest root (`Install-ADDSForest`) → OUs `Lab\{Admins,Users,Groups,Servers,Workstations}`, groups, domain admins (RID 512), test users → additional DCs (`Install-ADDSDomainController`) → DNS client order → DC roles (CA first) | DomainRole ≥ 4; AD lookups; CA `Active` value |
-| 6 | `MemberServers` | Create all → per server (CA server first): IP/DNS → join `OU=Servers` → roles ADCS → DHCP → FileServer → IIS (+HTTPS) → SQL → extra features | PartOfDomain; per-role checks; SQL service exists |
-| 7 | `Workstations` | Create all → IP/DNS → join `OU=Workstations` → optional testers in local Administrators → `gpupdate` | PartOfDomain; membership |
+| 5 | `DomainControllers` | Create all DC VMs **in parallel** → forest root (`Install-ADDSForest`) → OUs `Lab\{Admins,Users,Groups,Servers,Workstations}`, groups, domain admins (RID 512), test users → additional DCs (`Install-ADDSDomainController`) → DNS client order → DC roles (CA first) | DomainRole ≥ 4; AD lookups; CA `Active` value |
+| 6 | `MemberServers` | Create all **in parallel** → CA server(s) first, then **all other servers in parallel**: IP/DNS → join `OU=Servers` → roles ADCS → DHCP → FileServer → IIS (+HTTPS) → SQL → extra features | PartOfDomain; per-role checks; SQL service exists |
+| 7 | `Workstations` | Create all **in parallel** → **all in parallel**: IP/DNS → join `OU=Workstations` → optional testers in local Administrators → `gpupdate` | PartOfDomain; membership |
 | 8 | `Validate` | Host: switch type, VM state, vCPU/RAM, **dynamic disk size**, adapters; **OS of every VM** (catalog `CaptionPattern`); DCs: domain, all DCs present, services, replication; accounts (+Domain Admins), groups, DNS; roles; workstations (LTSC, membership, local admins); SQL servers (service, TCP, firewall, edition, auth mode, sysadmins, test database); client: HTTP/HTTPS per IIS, file share read, SQL over TCP (Windows auth, sa in Mixed mode), LDAP bind of a test user and a domain admin | read-only |
 
 ## 4. Role catalog
@@ -115,4 +117,7 @@ The wizard passes an entered admin password to the build via **stdin** only (ADR
 | FR-21 | `Library.ps1` (`Get-LabLibraryRoot`, `Invoke-LabLibraryLock`, `Move-LabLegacyMedia`, `Import-LabSuppliedIso`), `Save-LabIso`, `New-LabBaseImage` |
 | FR-22 | OS catalog `Iso.Images`, `Get-LabVmDefinition` (Image, Kind), `Test-LabConfig`, OS check in `Test-LabEnvironment`, wizard OS columns / workstation OS |
 | FR-23 | `Write-LabManifest` (after every phase), `Get-LabVmNote` in `New-LabVM` |
+| FR-24 | `Invoke-LabParallel`; parallel phases Iso, BaseImages, `New-LabVMSet`, `Initialize-LabMemberServer`, `Initialize-LabWorkstation`; locks VhdMount / CertTemplate / log writes |
+| FR-25 | `Disks.Type`, `New-LabVM` (differencing branch), `Get-LabBaseImageUser` (protection in base rebuild and `Remove-LabEnvironment`), validation disk check |
+| FR-26 | `Write-LabProgress` (`progress.jsonl`, `##LBP` lines), wizard Build page VM list |
 | dynamic disks (IN-6/7/12) | `New-LabVM` (copy + `Resize-VHD` + `Resize-Partition`), validation |

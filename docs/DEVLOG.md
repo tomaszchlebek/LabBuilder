@@ -513,3 +513,83 @@ Win11LTSC (10.0.26100.1742) built once and reused on resume ("Base image ... in 
 (no ISO), the host conflict switch check.
 **Next:** publish 1.2.0 (requester decision D4: publish after the host run passes); then 1.3.0 - ask the requester about the roadmap's
 optional differencing disks vs ADR 0008 first.
+
+## 2026-11-15 — Roadmap decision D5: differencing disks as an option (1.3.0)
+
+**Decision (requester):** "Offer as option" - 1.3.0 keeps plain dynamic VM disks (ADR 0008) as the default and offers differencing disks on
+the library base images as a per-lab choice. Consequence to handle in 1.3.0: such labs depend on their library base images, so
+`-IncludeLibrary` / 1.4.0 lab deletion must not delete a base image another lab's differencing disks use. ADR to be written with 1.3.0.
+**Also:** the 1.2.0 release exe was copied to `\itomhv01\downloads` after the wizard was closed on the host (SHA-256 matches).
+**Files:** `docs/ROADMAP.md` (D5, 1.3.0 section), `docs/DEVLOG.md`
+
+## 2026-11-15 — Release 1.3.0: parallel build, differencing-disk option, live VM progress
+
+**Request:** Roadmap 1.3.0 (old 1.1.6): "speed up the process ... by running tasks in parallel when possible, like duplicating base images
+and creating VMs - extract / copy once and use many times"; decision D5: differencing disks offered as an option.
+**Decision:** [ADR 0014](adr/0014-parallel-build-differencing-disks-progress.md); REQUIREMENTS v0.6 (IN-16, FR-24..FR-26, NFR-6).
+**What:**
+- `Private/Parallel.ps1`: `Invoke-LabParallel` - runspace pool (PS 5.1), each worker imports the module and runs the script block bound to
+  it (`NewBoundScriptBlock`), log prefix `[<item>]`, per-item log `Logs\vm-<item>.log`; the parent relays Information (Write-Host) and
+  Warning streams live (console, transcript, wizard); all items finish, failures summarised (`N of M ... failed: ...`); `-Sequential`
+  fallback. `Test-LabParallelEnabled`, `Get-LabThrottleLimit` (auto = half the logical CPUs, 2..8).
+- Parallel: phase Iso (per ISO, max 4), BaseImages (per OS, max 2), `New-LabVMSet` (all VMs of a phase), member servers (ADCS servers
+  first one by one, then the rest), workstations (`Initialize-LabMemberServer` / `Initialize-LabWorkstation` extracted). Forest root and
+  additional DCs unchanged (sequential).
+- Locks: `Write-LabLog` file writes (mutex), `VhdMount` (unattend injection - one mounted disk at a time), `CertTemplate` (template ACL
+  read-modify-write + CertSvc restart), unique ESP diskpart temp file; `Invoke-LabLibraryLock -Quiet` for these short internal locks.
+- Differencing option: `Disks.Type`, `New-LabVM` (New-VHD -Differencing + Resize-VHD), `Get-LabBaseImageUser` (parent chains of all VM
+  disks) protects bases in the ISO-change rebuild and in `Remove-LabEnvironment -IncludeLibrary`; validation accepts Differencing with an
+  existing parent; `lab.json` DiskType.
+- Progress: `Write-LabProgress` (progress.jsonl + `##LBP` line), `Get-LabPhaseOfRole`; events from VM creation, DC promotion/roles,
+  member servers, workstations. Wizard: Build options (parallel, disk type) on *Install & lab*, summary line, Build page VM list
+  (`OnProgressEvent`, malformed lines ignored); `LabModel.cs` reads/writes `Build.Parallel` and `Disks.Type`.
+- Example config `Disks`, `Build`; `Test-LabConfig` checks them. Version 1.3.0; README, RUNBOOK (8a, troubleshooting), ARCHITECTURE, ROADMAP.
+**Files:** `src/LabBuilder/Private/Parallel.ps1` (new), `src/LabBuilder/Public/{Write-LabLog,VM,Roles,HostSetup,Phase,Library,Config,Validation}.ps1`,
+`src/LabBuilder/LabBuilder.psd1`, `config/lab.config.example.psd1`, `installer/src/{LabModel,WizardForm}.cs`, `tests/Parallel.Tests.ps1` (new), docs.
+**Verification:**
+- Engine trial: 4 x 2 s items in 3.4 s, prefixed live lines, private helper available in workers, one failure reported while the others
+  finished, sequential mode.
+- Pester 79/79 (9 new: concurrency + module binding, failure summary, sequential order, 200 log lines from 4 workers complete/unmixed +
+  per-VM log, build/disk option defaults and validation, lab.json DiskType, progress.jsonl, role → phase).
+- Wizard model checks 0 failures (new: build options in config + round trip); pages rendered: Install & lab with Build options, Build page
+  with simulated progress events (ready green, failed red, malformed line ignored).
+- **Not verified (needs the host):** real parallel VM creation/joins/roles on Hyper-V, PowerShell Direct from several runspaces at once,
+  differencing disks end to end, CPU/disk load on ITOMHV01.
+**Next:** tester host run (new lab or the existing one: both parallel and differencing are worth one run); publish 1.3.0 when it passes.
+
+## 2026-11-15 — Redesign request: lab manager (designed, planned as 1.4.0)
+
+**Request (during the 1.3.0 host test):** wizard asks *create a new lab or edit an existing lab*; first run sets **App folder, Labs folder,
+Library folder**; the wizard scans the Library folder for imported ISOs and base images; every new lab gets its own subfolder in the
+Labs folder.
+**Finding:** all labs share one `<App>\config\lab.config.psd1` - building DIFFLAB overwrote TESTLAB's settings (TESTLAB cannot be
+re-loaded unless it was saved with *Save configuration...*); credentials live in `<App>\output\<Lab>`, lab folders anywhere on the host.
+**Design:** [ADR 0015](adr/0015-lab-manager-folders-and-start-page.md) (Accepted with decisions D6 1.4.0 after 1.3.0, D7 old labs registered in place, D8 default folders C:\LabBuilder, <data>:\LabBuilder-Labs, <data>:\LabBuilder-Library): host settings in `%ProgramData%\LabBuilder\settings.json`,
+first-run *Folders* page, start page (new / edit / delete / image library), `<LabsFolder>\<LabName>\` with its own config + VMs + logs +
+output, library inventory, lab discovery incl. registered 1.0-1.3 labs and orphaned tagged VMs, delete flow, reconstruction of a lost
+config from `lab.json` + Hyper-V. Merged with roadmap 1.4.0 (discover/delete), which needs the same inventory.
+**Not started in code:** the 1.3.0 build under test stays unchanged so test fixes are not mixed with the redesign; implementation after
+1.3.0 is published.
+**Files:** `docs/adr/0015-lab-manager-folders-and-start-page.md`, `docs/ROADMAP.md`, `docs/DEVLOG.md`
+
+## 2026-11-15 — Request: faster DC promotion and CA → planned as 1.4.1 (not coded)
+
+**Request:** "Promoting domain controller takes too much time same as adding certificate authority - can you speed up for example by
+creating base image"; then "think about it and add to future changes".
+**Analysis:** a pre-promoted forest image is not reusable (each lab has its own domain name, domain SID, krbtgt and passwords). What can be
+saved: the AD DS / AD CS feature installs (minutes per DC/CA, plus the first-boot servicing failures seen in run 2) via **role-ready base
+images** (features pre-installed, sysprep `/generalize /oobe /mode:vm`, fallback to the plain base), and the member-server/workstation
+OOBE time by **creating those VMs while the forest is promoted** (two parallel tasks in phase DomainControllers).
+**Result:** added to the roadmap as **1.4.1** (after the 1.4.0 lab manager) with the plan, expected gain and the ADR still to write.
+No code changed - the 1.3.0 build under test is unchanged.
+**Files:** `docs/ROADMAP.md`, `docs/DEVLOG.md`
+
+## 2026-11-15 — 1.3.0 tester run (DIFFLAB, parallel + differencing): "all good" → publish 1.3.0
+
+**Lab run:** ITOMHV01, exe 1.3.0 from `\itomhv01\downloads`, second lab **DIFFLAB** next to TESTLAB: own lab folder, switch and subnet,
+build options *parallel* + *differencing disks* on the library base images (`D:\LabBuilder-Library`). Tester reported "all good" (build
+and validation completed). Exercised for the first time on the host: parallel VM creation/configuration (runspace engine, PowerShell Direct
+from several runspaces), differencing disks end to end incl. the validation disk check, the live VM list, two labs on one host with the
+host conflict check passing.
+**Not exercised:** `Build.Parallel = $false`, base-image protection when an ISO changes, `Remove-Lab -IncludeLibrary` with differencing users.
+**Next:** publish 1.3.0 (D4); then 1.4.0 Lab manager (ADR 0015), then 1.4.1 faster DC/CA.

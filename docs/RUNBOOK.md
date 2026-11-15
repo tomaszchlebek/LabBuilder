@@ -21,7 +21,7 @@
 | Page | You decide |
 |------|-----------|
 | Welcome | prerequisite check (must be all OK/WARN) |
-| Install & lab | install folder (default `C:\LabBuilder`), lab name, lab folder (VM disks, logs, `lab.json`), **image library folder** shared by all labs (default `<lab drive>:\LabBuilder-Library`: ISOs + one base image per OS) |
+| Install & lab | install folder (default `C:\LabBuilder`), lab name, lab folder (VM disks, logs, `lab.json`), **image library folder** shared by all labs (default `<lab drive>:\LabBuilder-Library`: ISOs + one base image per OS); **build options**: VMs in parallel (default on), VM disks as independent dynamic copies (default) or **differencing disks** (fast, small; the VMs then depend on the library) |
 | Domain | forest FQDN, NetBIOS name, generated or entered lab administrator password |
 | Network | **isolated (Private)** or **host-reachable (Internal)** switch, switch name, /24 subnet |
 | Domain controllers | **how many (1–5)**, per DC: name, **operating system (Windows Server 2025 / 2022 / 2019)**, IP, **vCPU, RAM, disk (dynamic)**, extra roles (ADCS, IIS, DHCP, File Server, features) |
@@ -157,6 +157,8 @@ Lab administrator password: `(Import-Clixml .\output\TESTLAB\lab-admin.cred.xml)
 | Changed VM sizes after a build | Existing VMs are not resized; remove the lab (or the VM) and build again. |
 | SQL media download fails (phase Iso) | Read the error; download the package by hand (§4 "ISO links") into `<library>\ISO\SQL` and re-run. A file not signed by Microsoft is refused. |
 | SQL Setup fails | The error shows the exit code and the result lines of `Summary.txt` (path inside the VM in the message). Check RAM (≥ 4 GB recommended) and disk, then re-run `-Phase MemberServers,Workstations,Validate`. |
+| "N of M member servers/workstations failed: ..." | Each failed VM is named with its error (details in `Logs\vm-<name>.log`); the others finished. Fix the cause and run again. If the host is overloaded, lower `Build.ThrottleLimit` or build one VM at a time. |
+| "Base image ... was built from another ISO, but differencing disks of ... use it - kept" | Expected with differencing disks: the old base stays until no lab uses it; new labs keep using it too. Remove the differencing labs to get a rebuilt base. |
 | Changed SQL instance, authentication or collation | Not applied to an installed SQL Server — remove that VM and build again (groups, database and port are re-applied on every run). |
 | Evaluation expired | Server 180 days, Windows 11 LTSC 90 days — remove and rebuild (SQL Server Express does not expire; Windows 10 follows your ISO's licence). |
 
@@ -170,6 +172,18 @@ Lab administrator password: `(Import-Clixml .\output\TESTLAB\lab-admin.cred.xml)
 
 Only VMs named `<LabName>-<ComputerName>` from the config are removed. `-IncludeLibrary` also deletes the ISOs and base
 images **this lab uses** from the shared library — other labs on the host that use the same OS will download/build them again.
+A base image that differencing disks of another lab still use is never deleted (the log names the VMs).
+
+## 8a. Parallel build and progress (ADR 0014)
+
+- Phases Iso, BaseImages, the creation of all VMs, member servers (after the CA server) and workstations run in parallel; log lines
+  of parallel work start with `[<VM or item>]`, and each VM also has its own log `<lab folder>\Logs\vm-<name>.log`.
+- If one VM fails, the others still finish; the error lists every failed VM. Fix the cause and run again - finished VMs are skipped.
+- Too much load on a small host: lower `Build.ThrottleLimit` (e.g. 2) or clear *Build VMs in parallel* (one VM at a time).
+- Progress events (one JSON object per line) are in `<lab folder>\Logs\progress.jsonl`; the wizard shows them as the
+  *Virtual machines* list on the Build page.
+- **Differencing disks** (option): each VM disk is a child of `<library>\BaseImages\<OS>.vhdx`. Do not move or delete the library
+  while such a lab exists; LabBuilder itself never rebuilds or deletes a base image in use (an ISO update then only warns).
 
 ## 9. Recording a lab run
 

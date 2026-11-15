@@ -105,6 +105,19 @@
 
     BaseDiskSizeBytes = 32GB                # base image; each VM gets a dynamic copy expanded to DiskSizeBytes
 
+    # VM disks (ADR 0008, 0014): Dynamic = independent dynamically expanding copy of the base image (default);
+    # Differencing = differencing VHDX on the library base image (seconds per VM, small) - the VMs then depend on the library.
+    Disks = @{
+        Type = 'Dynamic'
+    }
+
+    # Parallel build (ADR 0014): ISOs, base images, VM creation, member servers (after the CA) and workstations run in parallel.
+    # ThrottleLimit 0 = auto (half the logical processors, 2..8). Parallel = $false runs one item at a time.
+    Build = @{
+        Parallel      = $true
+        ThrottleLimit = 0
+    }
+
     # 1..5 domain controllers. The first creates the forest; the others join it. Roles: ADCS, IIS, DHCP, FileServer.
     # Optional per server: Image = 'Server2025' | 'Server2022' | 'Server2019' (default Iso.DefaultServerImage).
     DomainControllers = @(

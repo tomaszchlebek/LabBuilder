@@ -18,6 +18,8 @@ driven by a Windows **setup wizard (`LabBuilderSetup.exe`)** where the tester ch
   and kept in a **shared image library** on the host: each ISO is downloaded and each base image built **once** and
   reused by every later lab
 - Each lab records itself in `<lab folder>\lab.json` and tags its VMs (`LabBuilder:<LabName>` in the VM notes)
+- **Parallel build** (VMs created and configured at the same time) with a live per-VM status list, and optional **differencing
+  disks** (VM disks in seconds, a few hundred MB each)
 - Post-build **validation report**
 
 ## Quick start

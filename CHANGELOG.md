@@ -5,6 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-11-15
+
+### Added
+- **Parallel build** (FR-24, ADR 0014): ISO downloads, base images (per OS), creation of all VMs, member servers (after the CA
+  server) and all workstations run in parallel - runspace-pool engine for Windows PowerShell 5.1 with live, VM-prefixed log lines,
+  a per-VM log (`<LabRoot>\Logs\vm-<name>.log`), a host-sized throttle (`Build.ThrottleLimit`, 0 = auto) and an error summary of
+  every failed VM (the others finish; a re-run resumes). Forest root and additional DCs stay sequential. `Build.Parallel = $false`
+  or the wizard option builds one VM at a time.
+- **Differencing disks as an option** (FR-25, decision D5): `Disks.Type = 'Differencing'` (wizard: Build options) creates each VM
+  disk as a differencing VHDX on its library base image (seconds, small). Base images used by differencing disks are never rebuilt
+  or deleted (`Remove-Lab.ps1 -IncludeLibrary` keeps them); validation accepts the disk type; `lab.json` records it. Default stays
+  independent dynamic copies.
+- **Live VM progress** (FR-26): progress events per VM and step in `<LabRoot>\Logs\progress.jsonl` and `##LBP` lines; the wizard's
+  Build page shows a **Virtual machines** list (creating / starting / configuring / joining / roles / promoting / ready / failed).
+
+### Changed
+- Locks so parallel work cannot collide: log writes, one VHD mount at a time (copies of one base share the GPT disk GUID),
+  certificate-template ACL change (concurrent IIS servers). Unique temp file for the ESP fallback when base images build in parallel.
+
 ## [1.2.0] — 2026-11-15
 
 ### Added

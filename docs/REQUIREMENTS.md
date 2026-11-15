@@ -1,13 +1,14 @@
 # Requirements — Build TEST environment
 
-- **Version:** 0.5 (2026-11-15)
+- **Version:** 0.6 (2026-11-15)
 - **Owner:** project requester
-- **Status:** v0.5 — v0.4 plus OS choice per VM and a shared image library (release 1.2.0)
+- **Status:** v0.6 — v0.5 plus parallel build, differencing-disk option and live VM progress (release 1.3.0)
 
 History: v0.1 brief · v0.2 ISOs downloaded first on the deployment machine; runs directly on any Hyper-V host ·
 v0.3 answers (Server 2025 OK, Windows 11 **LTSC**, host language/time zone, tester decides local admin + network isolation),
 tester-defined topology/roles/sizes/accounts, `.exe` wizard installer · v0.4 (1.1.0) SQL Server Express member servers with
-tester-chosen SQL options · v0.5 (1.2.0) OS per VM (Server 2019/2022/2025, Windows 11 LTSC, Windows 10 from the tester's ISO), shared image library, lab manifest.
+tester-chosen SQL options · v0.5 (1.2.0) OS per VM (Server 2019/2022/2025, Windows 11 LTSC, Windows 10 from the tester's ISO), shared image library, lab manifest · v0.6 (1.3.0) parallel build,
+differencing disks as an option, live VM progress.
 
 ## 1. Goal
 
@@ -34,8 +35,10 @@ Windows 11 clients. The tester runs a **Windows `.exe` installer wizard** on the
 | IN-13 | Pre-downloaded ISO folder | none | optional; may contain a `SQL` subfolder with the SQL Express package |
 | IN-15 | **Operating system per VM** | servers: Windows Server 2025; workstations: Windows 11 Enterprise LTSC | **tester decides**: each DC / member server Server 2019, 2022 or 2025 (Standard, Desktop Experience, evaluation); workstations (all the same) Windows 11 Enterprise LTSC or **Windows 10 Enterprise from an ISO the tester supplies** (no Microsoft evaluation download exists any more) |
 | IN-14 | **SQL Server options** (servers with role SQL) | instance `SQLEXPRESS`, TCP 1433, Windows auth, sysadmin: Domain Admins, database `LabDB` (db_owner `SG-Lab-Testers`), default collation | **tester decides** on the wizard page "SQL Server": instance name, TCP port, Windows/Mixed auth, sysadmin groups, test database + db_owner groups, collation |
+| IN-16 | **Build options** | parallel build on; disks = independent dynamic copies | **tester decides**: build VMs in parallel (or one at a time); VM disks as independent dynamic copies or as **differencing disks** on the library base images (decision D5) |
 
-All disks are **dynamically expanding VHDX** of the size the tester chooses.
+All disks are **dynamically expanding VHDX** of the size the tester chooses (independent copies by default; differencing disks, which are
+also dynamically expanding, only when the tester chooses them - IN-16).
 
 ## 3. Functional requirements
 
@@ -64,6 +67,9 @@ All disks are **dynamically expanding VHDX** of the size the tester chooses.
 | FR-21 | **Shared image library**: ISOs and base images are stored once per host (library folder) and reused by all labs; a base image is built once per OS and rebuilt only when its ISO changes; concurrent builds never build the same image twice; media of labs built with 1.0–1.1 (`<LabRoot>\ISO`, `<LabRoot>\BaseImages`) is moved into the library. | Must |
 | FR-22 | **OS choice per VM** (IN-15); validation checks the installed OS of every VM. | Must |
 | FR-23 | **Lab manifest**: each lab records its name, version, folders, switch and VMs in `<LabRoot>\lab.json`, and every VM carries a `LabBuilder:<LabName>` tag in its notes (basis for lab discovery, release 1.4.0). | Must |
+| FR-24 | **Parallel build** (IN-16): ISO downloads, base images, VM creation, member servers (after the CA server) and workstations run in parallel with a host-sized throttle; one failure does not stop the others and all failures are reported; resumable as before; can be switched off. | Must |
+| FR-25 | **Differencing disks** as an option (IN-16): VM disks are differencing VHDX on the library base images (fast, small); base images that differencing disks use are never rebuilt or deleted. | Should |
+| FR-26 | **Live progress per VM**: the build emits a status event per VM and step (wizard: VM list with status; JSON lines file for other front ends, e.g. the 3.0.0 web UI). | Must |
 
 ## 4. Non-functional requirements
 
@@ -74,7 +80,7 @@ All disks are **dynamically expanding VHDX** of the size the tester chooses.
 | NFR-3 | Secrets never in logs or on command lines; credential files protected and git-ignored; `unattend.xml` removed from VMs after first boot. |
 | NFR-4 | Every action logged (build log, transcript, host log). |
 | NFR-5 | All settings in one config file; the wizard writes it; command-line values override it. |
-| NFR-6 | Default build ≤ 2 hours after ISOs are cached. |
+| NFR-6 | Default build ≤ 2 hours after ISOs are cached; with the parallel build the time grows with the slowest VM, not with the number of VMs. |
 | NFR-7 | Input validation identical in wizard and scripts (the wizard runs the script validation before starting). |
 
 ## 5. Out of scope
@@ -100,6 +106,7 @@ All disks are **dynamically expanding VHDX** of the size the tester chooses.
 | Installer | .NET Framework 4.8 WinForms wizard `.exe` built with inbox `csc.exe`, payload embedded | [0011](adr/0011-wizard-installer-exe.md) |
 | SQL Server | SQL Server 2025 Express, member servers only; web installer download mode on the host, Microsoft signature check; unattended Setup from a deleted config file | [0012](adr/0012-sql-server-express-role.md) |
 | Image library / OS | Shared library folder for ISOs + base images (one per OS); OS catalog Server 2019/2022/2025, Windows 11 LTSC, Windows 10 (tester ISO); lab manifest + VM tags | [0013](adr/0013-shared-image-library-and-os-choice.md) |
+| Parallel build, disks, progress | Runspace pool engine with relayed logs and locks; differencing disks optional and library-protected; progress events (`##LBP` lines + progress.jsonl) | [0014](adr/0014-parallel-build-differencing-disks-progress.md) |
 
 ## 7. Answered questions (v0.2 → v0.3)
 

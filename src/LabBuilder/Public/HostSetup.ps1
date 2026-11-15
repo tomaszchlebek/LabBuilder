@@ -94,9 +94,14 @@ function New-LabBaseImage {
 
     # One base image per OS in the shared library <Library>\BaseImages\<Key>.vhdx (ADR 0013), built under a host-wide
     # lock so concurrent lab builds never build the same image twice.
-    foreach ($key in (Get-LabRequiredImageKey -Config $Config)) {
-        Invoke-LabLibraryLock -Name "Base-$key" -ScriptBlock { New-LabBaseImageItem -Config $Config -Key $key }
-    }
+    # Different OSes are built in parallel (ADR 0014; throttle 2 - disk bound).
+    $keys = @(Get-LabRequiredImageKey -Config $Config)
+    $null = Invoke-LabParallel -Items $keys -Label { param($k) "base $k" } -What 'base images' `
+        -ThrottleLimit (Get-LabThrottleLimit -Config $Config -Count $keys.Count -Max 2) -Sequential:(-not (Test-LabParallelEnabled -Config $Config)) `
+        -Arguments @{ Config = $Config } -ScriptBlock {
+            param($Item, $A)
+            Invoke-LabLibraryLock -Name "Base-$Item" -ScriptBlock { New-LabBaseImageItem -Config $A.Config -Key $Item }
+        }
 }
 
 function New-LabBaseImageItem {
@@ -138,7 +143,13 @@ function New-LabBaseImageItem {
             Write-LabLog "Base image $key in library: $vhd" -Level OK
             return
         }
-        # The ISO changed (new Microsoft build or another supplied ISO): rebuild. Lab VMs are independent copies (ADR 0008).
+        # The ISO changed (new Microsoft build or another supplied ISO): rebuild - unless differencing disks of a lab use this base
+        # (ADR 0014): then keep it, or those VMs would break.
+        $users = @(Get-LabBaseImageUser -Path $vhd)
+        if ($users.Count -gt 0) {
+            Write-LabLog "Base image $key was built from another ISO, but differencing disks of $($users -join ', ') use it - kept as it is." -Level WARN
+            return
+        }
         Write-LabLog "Base image $key was built from another ISO (SHA-256 $builtFrom, now $isoSha) - rebuilding." -Level WARN
         Set-ItemProperty -LiteralPath $vhd -Name IsReadOnly -Value $false
         Remove-Item -LiteralPath $vhd, "$vhd.json" -Force -ErrorAction SilentlyContinue
@@ -208,7 +219,7 @@ function New-LabBaseImageItem {
                 Set-Partition -DiskNumber $disk.Number -PartitionNumber $sys.PartitionNumber -GptType $esp -ErrorAction Stop
             } catch {
                 $script = "select disk $($disk.Number)`r`nselect partition $($sys.PartitionNumber)`r`nset id=c12a7328-f81f-11d2-ba4b-00a0c93ec93b override`r`n"
-                $sf = Join-Path $env:TEMP 'labbuilder-esp.txt'
+                $sf = Join-Path $env:TEMP ('labbuilder-esp-{0}.txt' -f [guid]::NewGuid())   # unique: base images are built in parallel
                 Set-Content -LiteralPath $sf -Value $script -Encoding ASCII
                 $dp = & diskpart.exe /s $sf 2>&1
                 Remove-Item -LiteralPath $sf -Force
