@@ -93,7 +93,7 @@ namespace LabBuilderSetup
             SwitchType = "Private"; SwitchName = "LAB-Isolated"; Prefix = "10.10.10";
             DomainControllers = new List<ServerSpec> { new ServerSpec("DC01", 10, 2, 4, 80, "ADCS") };
             MemberServers = new List<ServerSpec> { new ServerSpec("IIS01", 20, 2, 4, 80, "IIS") };
-            WsCount = 3; WsPrefix = "WS"; WsFirstOctet = 101; WsCpu = 2; WsMemoryGB = 4; WsDiskGB = 80;
+            WsCount = 1; WsPrefix = "WS"; WsFirstOctet = 101; WsCpu = 2; WsMemoryGB = 4; WsDiskGB = 80;
             DomainAdminCount = 1; TestUserCount = 3; PasswordLength = 16; TestUsersLocalAdmin = false;
             Groups = new List<GroupSpec> {
                 new GroupSpec("SG-Lab-Testers", "All lab test users"),

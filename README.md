@@ -45,7 +45,7 @@ Full instructions: [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 Hyper-V host: Windows Server 2019+ or Windows 10/11 Pro/Enterprise with Hyper-V and its PowerShell module,
 Windows PowerShell 5.1, .NET Framework 4.8 (for the wizard), disk and RAM for the VMs you choose
-(default lab: ~20 GB RAM, ~150 GB disk), internet access for the ISO download (or pre-downloaded ISOs).
+(default lab: ~12 GB RAM, ~150 GB disk), internet access for the ISO download (or pre-downloaded ISOs).
 No third-party software — neither to run nor to build.
 
 ## Development
@@ -53,7 +53,10 @@ No third-party software — neither to run nor to build.
 ```powershell
 Import-Module Pester -RequiredVersion 3.4.0; Invoke-Pester .\tests   # unit tests, no Hyper-V needed
 .\installer\build.ps1                                                  # builds installer\bin\LabBuilderSetup.exe with inbox csc.exe
+.\scripts\Publish-LabRelease.ps1 -Message 'feat: ...' -WhatIf          # maintainers: dry run of a GitHub release
 ```
+
+Planned versions: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Documentation
 

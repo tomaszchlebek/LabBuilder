@@ -34,7 +34,9 @@ wizard [0011](adr/0011-wizard-installer-exe.md).
 | Path | Purpose |
 |------|---------|
 | `installer/src/*.cs`, `installer/app.manifest` | Wizard (.NET Framework 4.8 WinForms, C# 5): pages, prerequisite check, psd1 writer/reader, process runner, embedded payload |
-| `installer/build.ps1` | Zips the payload, compiles `LabBuilderSetup.exe` with inbox `csc.exe` |
+| `installer/build.ps1` | Zips the payload, compiles `LabBuilderSetup.exe` with inbox `csc.exe` (icon + ITOM mark from `installer/branding`) |
+| `installer/branding/`, `installer/src/Brand.cs` | ITOM Solutions mark, icon and colours (same as the IT Portal branding) |
+| `scripts/Publish-LabRelease.ps1` | Maintainer release: checks, tests, exe build, commit, tag, GitHub release |
 | `scripts/Invoke-LabBuild.ps1` | Entry point: config, secrets, account plan, phases, summary |
 | `scripts/Test-LabConfigFile.ps1` | Validation + resolved host locale (wizard uses it) |
 | `scripts/Get-LabIso.ps1`, `scripts/Remove-Lab.ps1` | Pre-download, teardown |

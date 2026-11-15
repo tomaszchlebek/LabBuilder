@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-11-15
+
+### Added
+- Wizard branding **ITOM Solutions** ([www.itomsol.com](https://www.itomsol.com)): ITOM mark and "by ITOM Solutions" in the
+  side panel, brand colours (ink `#111A24`, lime `#C6F277`), accent line, website link, tagline and version; exe icon and
+  file properties (company, copyright). Same mark and colours as the IT Portal product branding.
+- `scripts/Publish-LabRelease.ps1` (maintainers): checks version/tag/CHANGELOG and staged files, runs the tests, builds the exe,
+  commits, tags and creates the GitHub release (`-WhatIf` for a dry run).
+- `docs/ROADMAP.md`: planned versions up to 3.0.0 and the requester's decisions.
+
+### Changed
+- The wizard opens **maximised** and stays freely resizable; notes wrap to the window width, grids and lists stretch, side panel,
+  header and step list are sized from the measured text (no clipping at high display scaling). The **SQL Server** page is shown
+  only when a member server has role SQL.
+- Default lab: **1 workstation** (was 3); the RAM estimate is now ~12 GB.
+
 ## [1.1.0] — 2026-11-14
 
 ### Added

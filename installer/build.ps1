@@ -67,6 +67,8 @@ using System.Reflection;
 [assembly: AssemblyTitle("LabBuilder Setup")]
 [assembly: AssemblyDescription("Wizard that installs LabBuilder and builds an isolated Hyper-V TEST environment.")]
 [assembly: AssemblyProduct("LabBuilder")]
+[assembly: AssemblyCompany("ITOM Solutions")]
+[assembly: AssemblyCopyright("Copyright (c) 2026 tomaszchlebek - www.itomsol.com - MIT licence")]
 [assembly: AssemblyVersion("$version.0")]
 [assembly: AssemblyFileVersion("$version.0")]
 [assembly: AssemblyInformationalVersion("$version")]
@@ -77,9 +79,13 @@ $exe = Join-Path $OutDir 'LabBuilderSetup.exe'
 $refs = @('System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll', 'System.ServiceProcess.dll',
           'System.Web.Extensions.dll', 'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll', 'Microsoft.VisualBasic.dll')
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $installer 'src') -Filter '*.cs' | ForEach-Object FullName) + $asmInfo
+$branding = Join-Path $installer 'branding'   # ITOM Solutions mark + icon (www.itomsol.com)
+foreach ($f in 'itom-mark.png', 'labbuilder.ico') { if (-not (Test-Path -LiteralPath (Join-Path $branding $f))) { throw "Branding file missing: $branding\$f" } }
 $cscArgs = @('/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/warn:4', '/langversion:5',
              "/out:$exe", ('/win32manifest:' + (Join-Path $installer 'app.manifest')),
-             "/resource:$zipPath,LabBuilderSetup.payload.zip") + ($refs | ForEach-Object { "/reference:$_" }) + $sources
+             ('/win32icon:' + (Join-Path $branding 'labbuilder.ico')),
+             "/resource:$zipPath,LabBuilderSetup.payload.zip",
+             ('/resource:' + (Join-Path $branding 'itom-mark.png') + ',LabBuilderSetup.itom-mark.png')) + ($refs | ForEach-Object { "/reference:$_" }) + $sources
 & $csc @cscArgs
 if ($LASTEXITCODE -ne 0) { throw "csc.exe failed with exit code $LASTEXITCODE" }
 

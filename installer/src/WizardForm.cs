@@ -26,6 +26,17 @@ namespace LabBuilderSetup
             public Control Content;
             public Func<bool> Leave;     // validate + store; false = stay
             public Action Enter;
+            public Func<bool> Hidden;    // true = page not needed now: skipped by Next/Back and not listed in the steps
+        }
+
+        bool IsHidden(int i) { return pages[i].Hidden != null && pages[i].Hidden(); }
+
+        // next/previous page that is not hidden (Welcome, Summary and Build are never hidden)
+        int Neighbour(int from, int dir)
+        {
+            int i = from + dir;
+            while (i > 0 && i < pages.Count - 1 && IsHidden(i)) i += dir;
+            return i;
         }
 
         static readonly Regex NameRx = new Regex(@"^(?![0-9]+$)[A-Za-z0-9][A-Za-z0-9-]{0,14}$");
@@ -70,6 +81,12 @@ namespace LabBuilderSetup
             ClientSize = new Size(1000, 680);
             MinimumSize = new Size(900, 600);
             StartPosition = FormStartPosition.CenterScreen;
+            // 1.1.1: opens maximised; the window stays freely resizable (Sizable border, maximise box) and every page
+            // stretches with it (anchored grids/lists, notes wrap to the page width).
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
+            WindowState = FormWindowState.Maximized;
+            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
             toolsDir = Path.Combine(Path.GetTempPath(), "LabBuilderSetup-" + Process.GetCurrentProcess().Id);
             try { Payload.ExtractTo(toolsDir); }
@@ -89,17 +106,45 @@ namespace LabBuilderSetup
 
         void BuildChrome()
         {
-            var left = new Panel { Dock = DockStyle.Left, Width = 190, BackColor = Color.FromArgb(32, 54, 84), Padding = new Padding(12, 16, 8, 8) };
-            var brand = new Label { Text = "LabBuilder", ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 14F), Dock = DockStyle.Top, Height = 34 };
-            var brand2 = new Label { Text = "Hyper-V TEST environment", ForeColor = Color.FromArgb(180, 200, 225), Dock = DockStyle.Top, Height = 28 };
-            steps = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(0, 12, 0, 0) };
-            left.Controls.Add(steps); left.Controls.Add(brand2); left.Controls.Add(brand);
+            // ITOM Solutions branding (www.itomsol.com; same mark and colours as the IT Portal, its ADR 0014).
+            // The form does not auto-scale pixel sizes (no AutoScaleDimensions) while fonts follow the display scaling, so
+            // every size here is either Px()-scaled or measured from its text - nothing wraps or clips at 100-200 %.
+            var fBrand = new Font("Segoe UI Semibold", 14F);
+            var fStep = new Font("Segoe UI Semibold", 9.5F);
+            var fSmall = new Font("Segoe UI", 8F);
+            int markSize = Px(40), gap = Px(10), padL = Px(14), padR = Px(10);
+            Func<string, Font, Size> measure = (txt, fnt) => TextRenderer.MeasureText(txt, fnt, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+            var szBrand = measure("LabBuilder", fBrand);
+            var szBy = measure("by ITOM Solutions", Font);
+            int brandW = markSize + gap + Math.Max(szBrand.Width, szBy.Width);
+            int textW = Math.Max(brandW, Math.Max(measure("Hyper-V TEST environment", Font).Width,
+                        Math.Max(measure("Better operations. Better outcomes.", fSmall).Width, measure("▶ Domain controllers", fStep).Width + Px(12))));
+            var left = new Panel { Dock = DockStyle.Left, Width = Math.Max(Px(200), padL + textW + padR + Px(8)), BackColor = Brand.Ink, Padding = new Padding(padL, Px(14), padR, Px(10)) };
 
-            var header = new Panel { Dock = DockStyle.Top, Height = 66, BackColor = Color.White, Padding = new Padding(16, 10, 16, 6) };
-            lblSubtitle = new Label { Dock = DockStyle.Top, Height = 22, ForeColor = Color.DimGray };
-            lblTitle = new Label { Dock = DockStyle.Top, Height = 28, Font = new Font("Segoe UI Semibold", 13F) };
+            int brandH = Math.Max(markSize, szBrand.Height + szBy.Height + Px(2));
+            var brandRow = new Panel { Dock = DockStyle.Top, Height = brandH, BackColor = Brand.Ink };
+            var mark = new PictureBox { Bounds = new Rectangle(0, (brandH - markSize) / 2, markSize, markSize), SizeMode = PictureBoxSizeMode.Zoom, Image = Brand.Mark() };
+            var brand = new Label { Text = "LabBuilder", ForeColor = Color.White, Font = fBrand, AutoSize = true, UseMnemonic = false, Location = new Point(markSize + gap - Px(2), (brandH - szBrand.Height - szBy.Height) / 2 - Px(2)) };
+            var brandBy = new Label { Text = "by ITOM Solutions", ForeColor = Brand.Lime, AutoSize = true, Location = new Point(markSize + gap, brand.Top + szBrand.Height + Px(2)) };
+            brandRow.Controls.Add(mark); brandRow.Controls.Add(brand); brandRow.Controls.Add(brandBy);
+            var brand2 = new Label { Text = "Hyper-V TEST environment", ForeColor = Brand.Muted, Dock = DockStyle.Top, AutoSize = false, Height = measure("Hy", Font).Height + Px(14), TextAlign = ContentAlignment.BottomLeft };
+            steps = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(0, Px(12), 0, 0) };
+            steps.Resize += (s, e) => { foreach (Control c in steps.Controls) c.Width = Math.Max(Px(120), steps.ClientSize.Width - 8); };
+            var foot = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 1, BackColor = Brand.Ink };
+            var site = new LinkLabel { Text = "www.itomsol.com", AutoSize = true, LinkColor = Brand.Lime, ActiveLinkColor = Color.White, VisitedLinkColor = Brand.Lime, LinkBehavior = LinkBehavior.HoverUnderline, Margin = new Padding(0, 0, 0, Px(2)) };
+            site.LinkClicked += (s, e) => { try { Process.Start("https://www.itomsol.com"); } catch { } };
+            var tagline = new Label { Text = "Better operations. Better outcomes.", ForeColor = Brand.Muted, AutoSize = true, Font = fSmall, Margin = new Padding(0, 0, 0, Px(2)) };
+            var ver = new Label { Text = "Version " + Payload.Version, ForeColor = Brand.Muted, AutoSize = true, Font = fSmall, Margin = new Padding(0) };
+            foot.Controls.Add(site, 0, 0); foot.Controls.Add(tagline, 0, 1); foot.Controls.Add(ver, 0, 2);
+            left.Controls.Add(steps); left.Controls.Add(foot); left.Controls.Add(brand2); left.Controls.Add(brandRow);
+
+            var fTitle = new Font("Segoe UI Semibold", 13F);
+            int titleH = measure("Wg", fTitle).Height + Px(6), subH = measure("Wg", Font).Height + Px(6);
+            var header = new Panel { Dock = DockStyle.Top, Height = titleH + subH + Px(16), BackColor = Color.White, Padding = new Padding(Px(16), Px(10), Px(16), Px(6)) };
+            lblSubtitle = new Label { Dock = DockStyle.Top, Height = subH, ForeColor = Color.DimGray, UseMnemonic = false };
+            lblTitle = new Label { Dock = DockStyle.Top, Height = titleH, Font = fTitle, ForeColor = Brand.Ink, UseMnemonic = false };
             header.Controls.Add(lblSubtitle); header.Controls.Add(lblTitle);
-            var sep = new Label { Dock = DockStyle.Top, Height = 1, BackColor = Color.Gainsboro };
+            var sep = new Label { Dock = DockStyle.Top, Height = Px(3), BackColor = Brand.Lime };   // brand accent line
 
             var bottom = new Panel { Dock = DockStyle.Bottom, Height = 52, Padding = new Padding(12, 10, 12, 10) };
             btnCancel = new Button { Text = "Cancel", Width = 96, Height = 30, Margin = new Padding(16, 0, 0, 0) };
@@ -116,7 +161,7 @@ namespace LabBuilderSetup
             leftButtons.Controls.Add(btnLoad); leftButtons.Controls.Add(btnSave);
             bottom.Controls.Add(right); bottom.Controls.Add(leftButtons);
 
-            btnBack.Click += (s, e) => { if (current > 0) ShowPage(current - 1); };
+            btnBack.Click += (s, e) => { if (current > 0) ShowPage(Neighbour(current, -1)); };
             btnNext.Click += (s, e) => Next();
             btnCancel.Click += (s, e) => Close();
             btnLoad.Click += (s, e) => { using (var d = new OpenFileDialog { Filter = "Lab configuration (*.psd1)|*.psd1" }) if (d.ShowDialog(this) == DialogResult.OK) LoadConfig(d.FileName); };
@@ -139,12 +184,14 @@ namespace LabBuilderSetup
             steps.Controls.Clear();
             for (int i = 0; i < pages.Count; i++)
             {
+                if (i != index && IsHidden(i)) continue;
                 steps.Controls.Add(new Label
                 {
                     Text = (i < index ? "\u2713 " : (i == index ? "\u25B6 " : "   ")) + pages[i].Step,
-                    ForeColor = i == index ? Color.White : Color.FromArgb(170, 190, 215),
+                    ForeColor = i == index ? Brand.Lime : (i < index ? Color.White : Brand.Muted),
                     Font = i == index ? new Font("Segoe UI Semibold", 9.5F) : new Font("Segoe UI", 9.5F),
-                    AutoSize = false, Width = 170, Height = 26, UseMnemonic = false
+                    // created after the form was scaled, so sizes are DPI-scaled by hand
+                    AutoSize = false, Width = Math.Max(Px(120), steps.ClientSize.Width - 8), Height = Px(26), UseMnemonic = false
                 });
             }
             bool isBuild = p.Step == "Build";
@@ -163,7 +210,7 @@ namespace LabBuilderSetup
             if (p.Step == "Build") { Close(); return; }
             if (p.Leave != null && !p.Leave()) return;
             if (p.Step == "Summary") { InstallAndBuild(); return; }
-            ShowPage(current + 1);
+            ShowPage(Neighbour(current, +1));
         }
 
         void OnClosing(object sender, FormClosingEventArgs e)
@@ -191,7 +238,21 @@ namespace LabBuilderSetup
             var t = new TableLayoutPanel { ColumnCount = 2, AutoScroll = true, Padding = new Padding(0, 4, 8, 4) };
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230));
             t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            t.Resize += (s, e) => WrapNotes(t);
             return t;
+        }
+
+        // Notes (and other labels tagged "wrap") wrap at the page width, so text uses a maximised window
+        // and still fits a small one. Capped for readability on very wide screens.
+        static void WrapNotes(TableLayoutPanel t)
+        {
+            int w = Math.Max(Px(360), Math.Min(Px(1100), t.ClientSize.Width - Px(30)));
+            foreach (Control c in t.Controls)
+            {
+                if (!"wrap".Equals(c.Tag)) continue;
+                int indent = t.GetColumn(c) == 1 ? 230 : 0;
+                c.MaximumSize = new Size(Math.Max(Px(240), w - indent), 0);
+            }
         }
 
         static void Row(TableLayoutPanel t, string label, Control c)
@@ -217,7 +278,7 @@ namespace LabBuilderSetup
         {
             t.RowCount++;
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            var l = new Label { Text = text, AutoSize = true, MaximumSize = new Size(720, 0), ForeColor = Color.DimGray, Margin = new Padding(3, 4, 3, 10) };
+            var l = new Label { Text = text, AutoSize = true, MaximumSize = new Size(720, 0), ForeColor = Color.DimGray, Margin = new Padding(3, 4, 3, 10), Tag = "wrap" };
             t.Controls.Add(l, 0, t.RowCount - 1);
             t.SetColumnSpan(l, 2);
             return l;
@@ -342,7 +403,7 @@ namespace LabBuilderSetup
 
             var ci = new Microsoft.VisualBasic.Devices.ComputerInfo();
             double freeGb = ci.AvailablePhysicalMemory / 1073741824.0;
-            add("Free memory (default lab needs ~20 GB)", freeGb >= 20, false, freeGb.ToString("N1") + " GB free of " + (ci.TotalPhysicalMemory / 1073741824.0).ToString("N0") + " GB");
+            add("Free memory (default lab needs ~12 GB)", freeGb >= 12, false, freeGb.ToString("N1") + " GB free of " + (ci.TotalPhysicalMemory / 1073741824.0).ToString("N0") + " GB");
             bool curl = File.Exists(Path.Combine(Environment.SystemDirectory, "curl.exe"));
             add("curl.exe (resumable ISO download)", curl, false, curl ? "found" : "falls back to Invoke-WebRequest");
         }
@@ -693,7 +754,7 @@ namespace LabBuilderSetup
         Page PageSql()
         {
             var t = Grid();
-            lblSqlState = new Label { AutoSize = true, MaximumSize = new Size(Px(720), 0), Margin = new Padding(3, 3, 3, 6), UseMnemonic = false, Font = new Font("Segoe UI Semibold", 9F) };
+            lblSqlState = new Label { Tag = "wrap", AutoSize = true, MaximumSize = new Size(Px(720), 0), Margin = new Padding(3, 3, 3, 6), UseMnemonic = false, Font = new Font("Segoe UI Semibold", 9F) };
             Full(t, lblSqlState);
             Heading(t, "Product");
             Row(t, "Edition", new Label { Text = "SQL Server 2025 Express (database engine) - downloaded from Microsoft, signature checked", AutoSize = true, Margin = new Padding(3, 7, 3, 3) });
@@ -722,6 +783,8 @@ namespace LabBuilderSetup
             return new Page
             {
                 Step = "SQL Server", Title = "SQL Server Express", Subtitle = "Options for the member servers with the SQL Express role", Content = t,
+                // Only shown when a member server has the SQL role ticked; otherwise the saved/default options are kept unused.
+                Hidden = () => !S.MemberServers.Any(x => x.Roles.Contains("SQL")),
                 Enter = () =>
                 {
                     var names = S.MemberServers.Where(x => x.Roles.Contains("SQL")).Select(x => x.Name).ToList();

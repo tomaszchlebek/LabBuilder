@@ -76,17 +76,17 @@ Describe 'BaseConfig layering (wizard configs)' {
 
 Describe 'Get-LabVmDefinition' {
     $defs = @(Get-LabVmDefinition -Config (Get-ValidConfig))
-    It 'returns 1 DC, 1 member server and 3 workstations by default' {
-        $defs.Count | Should Be 5
+    It 'returns 1 DC, 1 member server and 1 workstation by default' {
+        $defs.Count | Should Be 3
         @($defs | Where-Object Role -eq 'DomainController').Count | Should Be 1
         @($defs | Where-Object Role -eq 'MemberServer').Count | Should Be 1
-        @($defs | Where-Object Role -eq 'Workstation').Count | Should Be 3
+        @($defs | Where-Object Role -eq 'Workstation').Count | Should Be 1
     }
     It 'builds names, VM names, IPs and sizes' {
         $dc = $defs | Where-Object Role -eq 'DomainController'
         $dc.VMName | Should Be 'TESTLAB-DC01'
         $dc.IPAddress | Should Be '10.10.10.10'
-        ($defs | Where-Object Name -eq 'WS03').IPAddress | Should Be '10.10.10.103'
+        ($defs | Where-Object Name -eq 'WS01').IPAddress | Should Be '10.10.10.101'
         ($defs | Where-Object Name -eq 'WS01').DiskSizeBytes | Should Be 80GB
         ($defs | Where-Object Name -eq 'WS01').Image | Should Be 'Client'
     }
@@ -147,8 +147,8 @@ Describe 'Test-LabConfig' {
         Get-Errors $c | Should Match 'disk must be 40-2048 GB'
     }
     It 'rejects duplicate IPs, including generated workstation IPs' {
-        $c = Get-ValidConfig; $c.MemberServers[0].HostOctet = 102
-        Get-Errors $c | Should Match 'Duplicate IP address 10.10.10.102'
+        $c = Get-ValidConfig; $c.MemberServers[0].HostOctet = 101   # clashes with WS01 (default 1 workstation from .101)
+        Get-Errors $c | Should Match 'Duplicate IP address 10.10.10.101'
     }
     It 'rejects unknown roles, a second CA and a second DHCP server' {
         $c = Get-ValidConfig; $c.MemberServers[0].Roles = @('IIS', 'Exchange')

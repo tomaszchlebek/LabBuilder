@@ -5,7 +5,7 @@
 - A **dedicated Hyper-V host**: Windows Server 2019+ (Desktop Experience for the wizard) or Windows 10/11 Pro/Enterprise with the
   Hyper-V role and **Hyper-V PowerShell module**; .NET Framework 4.8 (inbox on Windows 10 1903+ / Server 2022+).
 - A local administrator account on the host and a console session there (local or RDP).
-- RAM and disk for the VMs you choose — the default lab (1 DC, 1 IIS server, 3 workstations, 4 GB each) needs **~20 GB free RAM**
+- RAM and disk for the VMs you choose — the default lab (1 DC, 1 IIS server, 1 workstation, 4 GB each) needs **~12 GB free RAM**
   and **~150 GB free disk** (dynamic disks start at ~15 GB each and grow up to the chosen size).
 - Internet access from the host for the ISO download (~13 GB; plus ~300 MB SQL Server Express media if a server gets role SQL) — or pre-downloaded media (§4).
 - Your decisions: domain FQDN (e.g. `lab.test`, not `.local`) and NetBIOS name (≤ 15 characters), plus the topology below.
@@ -14,7 +14,7 @@
 
 1. Copy **`LabBuilderSetup.exe`** to the host. If Windows SmartScreen warns (the exe is not code-signed), choose
    *More info → Run anyway*, or unblock it in the file properties.
-2. Run it and accept the administrator prompt. Pages:
+2. Run it and accept the administrator prompt. The wizard opens maximised (resize or restore it freely). Pages:
 
 | Page | You decide |
 |------|-----------|
@@ -25,7 +25,7 @@
 | Domain controllers | **how many (1–5)**, per DC: name, IP, **vCPU, RAM, disk (dynamic)**, extra roles (ADCS, IIS, DHCP, File Server, features) |
 | Member servers | **how many (0–10)**, per server: name, IP, size, **roles** (ADCS, IIS, DHCP, File Server, **SQL**); IIS HTTPS, DHCP range, share name |
 | Accounts | **number of dedicated domain admins**, **number of test users**, password length, **test users local admins yes/no**, security groups |
-| SQL Server | for servers with role SQL (SQL Server 2025 Express): **instance name** (`SQLEXPRESS` named / `MSSQLSERVER` default), **static TCP port**, **Windows or Mixed authentication** (sa password generated), **sysadmin groups** (Domain Admins always), **test database** (or none) and its **db_owner groups**, **collation** |
+| SQL Server | **shown only when a member server has role SQL** (SQL Server 2025 Express): **instance name** (`SQLEXPRESS` named / `MSSQLSERVER` default), **static TCP port**, **Windows or Mixed authentication** (sa password generated), **sysadmin groups** (Domain Admins always), **test database** (or none) and its **db_owner groups**, **collation** |
 | Workstations | **how many (0–20)**, name prefix, first IP, **generic vCPU / RAM / disk (dynamic)** |
 | ISOs | download from Microsoft, or a pre-downloaded folder |
 | Summary | everything, resource totals vs host, VM regional settings (from this host); validated with the build rules |

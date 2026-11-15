@@ -324,3 +324,76 @@ created the GitHub release with `LabBuilderSetup.exe` (SHA-256 930BD376...71AD05
 **Files:** all 1.1.0 files (see the 1.1.0 entry), `docs/DEVLOG.md`
 **Verification:** release page and asset checked with `gh release view v1.1.0`.
 **Next:** Further work from the tester.
+
+## 2026-11-15 — Roadmap for 1.1.1 to 3.0.0
+
+**Request:** Plan the requester's idea list (branding, maximised window, OS choice, host compatibility, shared base images,
+parallel build, lab discovery/delete, Exchange, IT Portal injection, VyOS + VyManager, web interface), reorganised to minimise work;
+update GitHub with every version.
+**What:** `docs/ROADMAP.md` — merged 1.1.1+1.1.2 and 1.1.3+1.1.5, moved host compatibility after the parallel engine (test hosts built
+by LabBuilder itself), IT Portal before Exchange, old 1.4.0 dropped (done in 1.1.0); shared groundwork list; decisions D1-D4.
+**Research:** Evaluation Center still offers Server 2019 and 2022; the Windows 10 Enterprise evaluation page redirects to the
+end-of-support post (no Windows 10 eval); no "Exchange 2025" exists (successor is Subscription Edition); Exchange 2019 ended support
+14 Oct 2025 and its evaluation page returns 404; VyManager is a community Docker Compose app needing the VyOS API.
+**Files:** `docs/ROADMAP.md`, `docs/DEVLOG.md`
+**Verification:** n/a (plan only).
+**Next:** Requester decisions recorded (next entry), then start 1.1.1.
+
+## 2026-11-15 — Roadmap decisions D1-D4
+
+**What:** Requester answered the open roadmap questions: D1 Windows 10 from a tester-supplied ISO; D2 Exchange 2019 CU15 **and**
+Subscription Edition (trial); D3 web UI public on the internet with sign-in + MFA (hardening list added to 3.0.0); D4 publish each
+version after the tester host run.
+**Files:** `docs/ROADMAP.md`, `docs/DEVLOG.md`
+**Next:** Start 1.1.1 (branding + resizable wizard).
+
+## 2026-11-15 — Release 1.1.1: branded, resizable wizard (+ release script)
+
+**Request:** Roadmap 1.1.1 (old 1.1.1 + 1.1.2): brand the exe with www.itomsol.com (appearance/logo from the website or the IT Portal
+project); run the application maximised and allow resizing.
+**What:**
+- Branding from the IT Portal project (its ADR 0014; mark = itomsol.com favicon): `installer/branding/` (mark SVG/PNG, icon),
+  `installer/src/Brand.cs` (ink `#111A24`, lime `#C6F277`); side panel in ink with mark, "LabBuilder / by ITOM Solutions",
+  lime current step, footer link www.itomsol.com + tagline + version; lime accent line under the page header; exe icon
+  (`/win32icon`), embedded mark, assembly company/copyright. `build.ps1` fails if branding files are missing.
+- Window: opens maximised, Sizable + maximise box; notes wrap to the page width (capped for readability); step labels sized by DPI and
+  follow the panel width (they were created after form scaling with fixed pixels).
+- `scripts/Publish-LabRelease.ps1`: version/tag/CHANGELOG checks, refuses secret/output files, Pester, exe build + version check,
+  commit/push/tag, `gh release create` with CHANGELOG notes (absolute links) + SHA-256; `-WhatIf` dry run.
+- Version 1.1.1; CHANGELOG, README, ARCHITECTURE, RUNBOOK updated.
+**Files:** `installer/src/{WizardForm,Brand}.cs`, `installer/build.ps1`, `installer/branding/*`, `scripts/Publish-LabRelease.ps1`,
+`src/LabBuilder/LabBuilder.psd1`, `CHANGELOG.md`, `README.md`, `docs/{ARCHITECTURE,RUNBOOK,ROADMAP,DEVLOG}.md`
+**Verification:** Pester 52/52; wizard model checks pass (0 failures); `Publish-LabRelease.ps1 -WhatIf` dry run OK (first runs found: git CRLF warnings on stderr were fatal in PS 5.1, -WhatIf leaked into Pester/build, a stale index.lock from the interrupted run - all fixed; index is reset on failure); parse + ASCII clean; exe 1.1.1 (ProductVersion 1.1.1, company ITOM Solutions);
+pages rendered at 1600x950 and 900x600 and inspected (first render showed a stray scrollbar in the step list - fixed).
+**Not verified:** maximised start and icon on the tester's high-DPI host (render harness runs in a non-maximised window).
+**Next:** Tester run of the exe; then publish 1.1.1 with `Publish-LabRelease.ps1`.
+
+## 2026-11-15 — 1.1.1 fix: side panel brand clipped at high DPI
+
+**Problem (tester screenshot, high-DPI host):** "LabBuilder" wrapped to "LabBuilde / r", "by ITOM Solutions" wrapped, the subtitle was cut to
+"Hyper-V TEST". **Cause:** the form sets `AutoScaleMode.Font` without `AutoScaleDimensions`, so WinForms never scales pixel sizes,
+while fonts follow the display scaling; the 200 px panel stayed 200 px with 150 % text.
+**Fix:** side panel width and brand block are computed from measured text (`TextRenderer.MeasureText`) and `Px()` (mark, gaps,
+padding); brand block laid out explicitly (no wrapping table cell); page header height measured from its fonts.
+**Verification:** rendered at 100 % (clean); width check with fonts scaled 1.5x/2.0x: panel 300/413 px holds the widest text
+(tagline 252/357 px) - fits. Not verifiable here: a real 150 % display (tester re-run).
+
+## 2026-11-15 — 1.1.1: default 1 workstation, SQL page only when needed
+
+**Request (tester, with screenshots):** "number of test stations default to 1"; "show this SQL configuration page only if tester choose
+to install SQL server". The tester's screenshots also show the fixed side panel at high DPI.
+**What:** Default workstation count 3 → 1 (example config, `LabModel.cs`, test, RUNBOOK/README RAM estimate ~12 GB, wizard memory check
+threshold 12 GB). Wizard pages can be hidden (`Page.Hidden`): the SQL Server page is skipped by Next/Back and left out of the step list
+unless a member server has role SQL (its options stay saved; `Test-LabSqlConfig` ignores them without SQL servers).
+**Files:** `config/lab.config.example.psd1`, `installer/src/{LabModel,WizardForm}.cs`, `tests/LabBuilder.Tests.ps1`, `README.md`,
+`docs/RUNBOOK.md`, `CHANGELOG.md`
+**Verification:** navigation test (reflection): without SQL Accounts → Workstations and back, step list without "SQL Server"; with SQL
+on IIS01 Accounts → SQL Server → Workstations, step listed. Pester 52/52 (duplicate-IP test moved from WS02 to WS01); wizard model checks 0 failures.
+
+## 2026-11-15 — Publish release 1.1.1
+
+**What:** Requester approved publishing 1.1.1 (branding, maximised/resizable wizard, high-DPI side panel fix, default 1 workstation,
+SQL page only when needed, release script, roadmap). Published with `scripts/Publish-LabRelease.ps1` (first real use): tests,
+exe build, commit, push, tag `v1.1.1`, GitHub release with `LabBuilderSetup.exe`.
+**Verification:** `gh release view v1.1.1`.
+**Next:** 1.2.0 - shared image library and OS choice (docs/ROADMAP.md).

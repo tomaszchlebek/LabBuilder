@@ -79,7 +79,7 @@
 
     # 0..20 Windows 11 workstations named <NamePrefix>01, 02, ... with IPs from FirstHostOctet.
     Workstations = @{
-        Count          = 3
+        Count          = 1
         NamePrefix     = 'WS'
         FirstHostOctet = 101
         ProcessorCount = 2
