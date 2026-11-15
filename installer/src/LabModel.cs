@@ -79,6 +79,10 @@ namespace LabBuilderSetup
         public string LibraryRoot;     // shared image library (ADR 0013)
         public string WsImage;         // Win11LTSC | Win10
         public string Win10IsoPath;    // tester-supplied Windows 10 ISO (Iso.Images.Win10.SourcePath)
+        public string OutputPath;      // Paths.OutputPath: <LabRoot>\output for labs created with 1.4.0+ ('' = <App>\output\<Lab>)
+        public string Mode;            // New | Edit (lab manager, ADR 0015)
+        public string ConfigPath;      // the lab's own config file (Edit), '' for a new lab
+        public bool Reconstructed;     // config rebuilt from lab.json + Hyper-V: NetBIOS and roles must be confirmed
         public bool Parallel;          // Build.Parallel (ADR 0014)
         public string DiskType;        // Disks.Type: Dynamic | Differencing (ADR 0014, decision D5)
         public string Fqdn;
@@ -124,6 +128,7 @@ namespace LabBuilderSetup
             LibraryRoot = DefaultLibraryFor(LabRoot);
             WsImage = OsCatalog.DefaultClient; Win10IsoPath = "";
             Parallel = true; DiskType = "Dynamic";
+            OutputPath = ""; Mode = "New"; ConfigPath = ""; Reconstructed = false;
             Fqdn = ""; NetBios = "";
             GeneratePassword = true; AdminPassword = "";
             SwitchType = "Private"; SwitchName = "LAB-Isolated"; Prefix = "10.10.10";
@@ -187,16 +192,20 @@ namespace LabBuilderSetup
         }
 
         /// <summary>Config v2 holding only the tester's choices; everything else comes from BaseConfig (ADR 0011).</summary>
-        public string ToPsd1()
+        public string ToPsd1() { return ToPsd1("lab.config.example.psd1"); }
+
+        /// <param name="baseConfig">BaseConfig path: relative to the config file, or absolute (the lab's own config in its lab
+        /// folder points at &lt;App&gt;\config\lab.config.example.psd1 - ADR 0015).</param>
+        public string ToPsd1(string baseConfig)
         {
             var sb = new StringBuilder();
             sb.AppendLine("# Written by LabBuilderSetup.exe on " + DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + ".");
             sb.AppendLine("# Only the tester's choices are here; all other settings come from BaseConfig. ASCII only.");
             sb.AppendLine("@{");
-            sb.AppendLine("    BaseConfig    = 'lab.config.example.psd1'");
+            sb.AppendLine("    BaseConfig    = " + Q(baseConfig));
             sb.AppendLine("    SchemaVersion = 2");
             sb.AppendLine("    LabName       = " + Q(LabName));
-            sb.AppendLine("    Paths   = @{ LabRoot = " + Q(LabRoot) + "; LibraryRoot = " + Q(LibraryRoot) + " }");
+            sb.AppendLine("    Paths   = @{ LabRoot = " + Q(LabRoot) + "; LibraryRoot = " + Q(LibraryRoot) + "; OutputPath = " + Q(OutputPath) + " }");
             if (!string.IsNullOrEmpty(Win10IsoPath))
                 sb.AppendLine("    Iso     = @{ Images = @{ Win10 = @{ SourcePath = " + Q(Win10IsoPath) + " } } }");
             sb.AppendLine("    Disks   = @{ Type = " + Q(DiskType == "Differencing" ? "Differencing" : "Dynamic") + " }");
@@ -291,6 +300,7 @@ namespace LabBuilderSetup
             s.InstallDir = keep.InstallDir; s.IsoSource = keep.IsoSource;
             s.LabName = S(d, "LabName", s.LabName);
             s.LabRoot = S(d, "Paths.LabRoot", s.LabRoot);
+            s.OutputPath = S(d, "Paths.OutputPath", "");
             s.LibraryRoot = S(d, "Paths.LibraryRoot", "");
             if (string.IsNullOrEmpty(s.LibraryRoot)) s.LibraryRoot = DefaultLibraryFor(s.LabRoot);
             s.WsImage = S(d, "Workstations.Image", OsCatalog.DefaultClient);

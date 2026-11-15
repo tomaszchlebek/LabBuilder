@@ -593,3 +593,45 @@ from several runspaces), differencing disks end to end incl. the validation disk
 host conflict check passing.
 **Not exercised:** `Build.Parallel = $false`, base-image protection when an ISO changes, `Remove-Lab -IncludeLibrary` with differencing users.
 **Next:** publish 1.3.0 (D4); then 1.4.0 Lab manager (ADR 0015), then 1.4.1 faster DC/CA.
+
+## 2026-11-15 — Release 1.4.0: lab manager (redesign) with discovery and deletion
+
+**Request:** the requester's redesign (start page new/edit lab, first-run App/Labs/Library folders, library scan, each lab in its own
+subfolder) merged with roadmap 1.4.0 (discover and delete labs) - decisions D6-D8, [ADR 0015](adr/0015-lab-manager-folders-and-start-page.md).
+REQUIREMENTS v0.7 (FR-27..FR-30).
+**What:**
+- Module `Public/LabManager.ps1`: host settings (`%ProgramData%\LabBuilder\settings.json`), `Get-LabOutputPath` (config `Paths.OutputPath`;
+  new labs `<LabRoot>\output`, older labs `<App>\output\<Lab>`), `Get-LabInventory` (Labs folder, registered labs, labs discovered from tagged
+  VMs - lab folder = parent of `VMs`; VM states, size, disk type, last phase), `Register-LabExternal`, `Get-LabLibraryInventory` (per OS ISO +
+  base image + differencing users, unknown ISOs, servers first), `Restore-LabLegacyConfig` (newest matching old shared config or `.bak-<time>`
+  copy -> `<LabRoot>\lab.config.psd1`, BaseConfig absolute), `New-LabConfigFromInventory` (fallback rebuild from lab.json + Hyper-V),
+  `Remove-LabFromInventory` (only the lab's own VMs/files/folder/credentials; never library files; foreign files keep the folder).
+- Scripts: `Get-LabInventory.ps1` (JSON back end; `-SaveSettings`, `-RegisterDiscovered` incl. restoring old configs, `-ReconstructConfig`),
+  `Invoke-LabBuild.ps1 -LabName`, `Remove-Lab.ps1 -LabName [-Force]`; output folder via `Get-LabOutputPath`; conflict check also reads the lab's
+  own output folder.
+- Wizard (`WizardForm` partial + `LabManagerPages.cs`): pages Folders (first run / Change folders), Start (new / edit / delete / library + lab
+  list + library summary), Delete lab (preview, typed name, live log via `Remove-Lab.ps1 -LabName -Force`), Image library; *Install & lab* ->
+  *Lab* (paths read-only from settings, folder follows the name, name must be new and its folder empty); Edit loads the lab's config, locks
+  name/domain/network/disk type (NetBIOS editable after a rebuild); the lab's config is written to its lab folder (no shared
+  `config\lab.config.psd1`); summary shows the action; Load/Save hidden on manager pages. `LabModel`: `ToPsd1(baseConfig)`, OutputPath, Mode.
+- Example config `Paths.OutputPath`; validation. Version 1.4.0; README, RUNBOOK, ARCHITECTURE, ROADMAP, CHANGELOG.
+**Files:** `src/LabBuilder/Public/{LabManager,Library,Config}.ps1`, `src/LabBuilder/LabBuilder.psd1`, `scripts/{Get-LabInventory,Invoke-LabBuild,Remove-Lab}.ps1`,
+`config/lab.config.example.psd1`, `installer/src/{LabManagerPages,WizardForm,LabModel}.cs`, `tests/LabManager.Tests.ps1` (new), docs.
+**Verification:**
+- Pester 88/88 (9 new: settings first run + round trip, output path + validation, conflict in own output folder, inventory of Labs folder +
+  external lab, register once, restore from the newest matching backup (roles kept, other lab's current file ignored), rebuild a valid config
+  from lab.json, library inventory incl. older-ISO base and unknown ISO, delete files-only with library kept and foreign files keeping the folder).
+- `Get-LabInventory.ps1` on this PC: first-run defaults, `-SaveSettings` writes settings, JSON output parsed.
+- Wizard model checks 0 failures (new: own config with absolute BaseConfig validates, OutputPath in config + round trip). Pages rendered:
+  Folders, Start (empty host), Image library, Delete (preview from real JSON, button enabled only after typing the name), Lab (folder follows
+  the name); navigation New -> Lab, Library -> Image library, Delete -> Delete lab.
+- **Not verified (needs the host):** discovery/registration of TESTLAB and DIFFLAB, restoring their configs from the `.bak` files, Edit of an
+  existing lab end to end, deleting a lab with real VMs/switch, a new lab inside the Labs folder.
+**Next:** tester host run, then publish 1.4.0; then 1.4.1 (faster DC/CA).
+
+## 2026-11-15 — 1.4.0 tester run (lab manager): "all good" → publish 1.4.0
+
+**Lab run:** ITOMHV01, exe 1.4.0 from `\itomhv01\downloads`; tester reported "all good" after the suggested test (first-run folders,
+start page with the existing labs, image library view, edit, delete). First host run of: settings file, discovery/registration of the
+1.0-1.3 labs (TESTLAB, DIFFLAB), config restore/rebuild, Edit and Delete with real VMs, library inventory.
+**Next:** publish 1.4.0 (D4); then 1.4.1 faster DC/CA (roadmap).

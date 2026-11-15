@@ -68,3 +68,16 @@ roadmap's 1.4.0 ("discover existing labs, delete a chosen lab") needs exactly th
 - **D7** Existing labs (TESTLAB in `D:\HyperVLab`, DIFFLAB in `D:\HyperVLab-Diff`): **registered in place**, nothing moved.
 - **D8** Default folders: **`C:\LabBuilder`** (app), **`<data drive>:\LabBuilder-Labs`**, **`<data drive>:\LabBuilder-Library`**
   (data drive = D: if present, else C:).
+
+## Implementation notes (release 1.4.0, 2026-11-15)
+- Module `Public/LabManager.ps1`: `Get-LabHostSettings` / `Set-LabHostSettings`, `Get-LabOutputPath` (`Paths.OutputPath`, new labs
+  `<LabRoot>\output`), `Get-LabInventory` (Labs folder, registered labs, labs discovered from tagged VMs: lab folder = parent of `VMs`),
+  `Register-LabExternal`, `Get-LabLibraryInventory`, **`Restore-LabLegacyConfig`** (the old shared `<App>\config\lab.config.psd1` and the
+  wizard's `.bak-<time>` copies are searched for the newest file with the same LabName + LabRoot - preferred over reconstruction because it
+  keeps the roles), `New-LabConfigFromInventory` (fallback), `Remove-LabFromInventory` (deletes only the lab's own files/folders; library
+  files are never deleted, foreign files keep the folder).
+- `scripts/Get-LabInventory.ps1` (JSON back end for the wizard: `-SaveSettings`, `-RegisterDiscovered`, `-ReconstructConfig`),
+  `Invoke-LabBuild.ps1 -LabName`, `Remove-Lab.ps1 -LabName [-Force]`.
+- Wizard: pages *Folders* (first run / "Change folders..."), *Start*, *Delete lab*, *Image library* (`installer/src/LabManagerPages.cs`,
+  `WizardForm` is a partial class); the former *Install & lab* page is *Lab* (paths read-only from the host settings); Edit locks name,
+  domain, network and disk type (NetBIOS editable only for a reconstructed config); the lab's config is written to its lab folder.

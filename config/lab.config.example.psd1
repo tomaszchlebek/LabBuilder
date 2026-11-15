@@ -9,6 +9,7 @@
     Paths = @{
         LabRoot     = 'D:\HyperVLab'        # this lab on the Hyper-V host: VMs, Logs, Reports, lab.json
         LibraryRoot = ''                    # image library shared by ALL labs (ISO, BaseImages); '' = <LabRoot drive>:\LabBuilder-Library
+        OutputPath  = ''                    # credentials, summary, reports; '' = <App>\output\<LabName> (wizard 1.4.0+: <LabRoot>\output)
         MinFreeGB   = 150                   # free space required on the LabRoot drive
     }
 

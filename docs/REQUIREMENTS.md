@@ -1,14 +1,14 @@
 # Requirements — Build TEST environment
 
-- **Version:** 0.6 (2026-11-15)
+- **Version:** 0.7 (2026-11-15)
 - **Owner:** project requester
-- **Status:** v0.6 — v0.5 plus parallel build, differencing-disk option and live VM progress (release 1.3.0)
+- **Status:** v0.7 — v0.6 plus the lab manager: host folders, start page new/edit/delete, one folder per lab, library inventory (release 1.4.0)
 
 History: v0.1 brief · v0.2 ISOs downloaded first on the deployment machine; runs directly on any Hyper-V host ·
 v0.3 answers (Server 2025 OK, Windows 11 **LTSC**, host language/time zone, tester decides local admin + network isolation),
 tester-defined topology/roles/sizes/accounts, `.exe` wizard installer · v0.4 (1.1.0) SQL Server Express member servers with
 tester-chosen SQL options · v0.5 (1.2.0) OS per VM (Server 2019/2022/2025, Windows 11 LTSC, Windows 10 from the tester's ISO), shared image library, lab manifest · v0.6 (1.3.0) parallel build,
-differencing disks as an option, live VM progress.
+differencing disks as an option, live VM progress · v0.7 (1.4.0) lab manager (ADR 0015).
 
 ## 1. Goal
 
@@ -70,6 +70,10 @@ also dynamically expanding, only when the tester chooses them - IN-16).
 | FR-24 | **Parallel build** (IN-16): ISO downloads, base images, VM creation, member servers (after the CA server) and workstations run in parallel with a host-sized throttle; one failure does not stop the others and all failures are reported; resumable as before; can be switched off. | Must |
 | FR-25 | **Differencing disks** as an option (IN-16): VM disks are differencing VHDX on the library base images (fast, small); base images that differencing disks use are never rebuilt or deleted. | Should |
 | FR-26 | **Live progress per VM**: the build emits a status event per VM and step (wizard: VM list with status; JSON lines file for other front ends, e.g. the 3.0.0 web UI). | Must |
+| FR-27 | **Host folders**: on the first run the wizard sets the **App, Labs and Library folders** (host settings file); they can be changed later. | Must |
+| FR-28 | **Start page**: *create a new lab*, *edit an existing lab* (its own config; name, domain and network fixed; add servers, workstations, roles; build again), *delete a lab* (preview, typed name, VMs + disks + lab files + credentials, switch if unused, never the library), *show the image library*. | Must |
+| FR-29 | **One folder per lab** `<Labs folder>\<LabName>` with the lab's own config, VMs, logs, reports and credentials. Labs from 1.0-1.3 are registered in place; their config is restored from the old shared config/backups or rebuilt from lab.json + Hyper-V. | Must |
+| FR-30 | **Library inventory**: the wizard lists per OS the ISO and base image (build, date, ISO match, differencing users) and unknown ISO files. | Must |
 
 ## 4. Non-functional requirements
 

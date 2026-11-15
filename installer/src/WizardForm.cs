@@ -16,7 +16,7 @@ using Microsoft.Win32;
 
 namespace LabBuilderSetup
 {
-    public class WizardForm : Form
+    public partial class WizardForm : Form
     {
         class Page
         {
@@ -96,6 +96,7 @@ namespace LabBuilderSetup
 
             BuildChrome();
             BuildPages();
+            InitLabManager();
             if (!string.IsNullOrEmpty(preloadConfig)) LoadConfig(preloadConfig);
             ShowPage(0);
             FormClosing += OnClosing;
@@ -199,7 +200,8 @@ namespace LabBuilderSetup
             bool isBuild = p.Step == "Build";
             bool isSummary = p.Step == "Summary";
             btnBack.Enabled = index > 0 && !isBuild;
-            btnLoad.Visible = btnSave.Visible = !isBuild;
+            bool managerOnly = p.Step == "Folders" || p.Step == "Delete lab" || p.Step == "Image library";   // no config to load/save there
+            btnLoad.Visible = btnSave.Visible = !isBuild && !managerOnly;
             btnNext.Text = isSummary ? (cConfigOnly.Checked ? "Install" : "Install && build") : (isBuild ? "Close" : "Next >");
             btnNext.Enabled = !isBuild || buildFinished;
             if (p.Enter != null) p.Enter();
@@ -210,6 +212,7 @@ namespace LabBuilderSetup
         {
             var p = pages[current];
             if (p.Step == "Build") { Close(); return; }
+            if (HandleManagerNext(p)) return;   // delete / image library pages (LabManagerPages.cs)
             if (p.Leave != null && !p.Leave()) return;
             if (p.Step == "Summary") { InstallAndBuild(); return; }
             ShowPage(Neighbour(current, +1));
@@ -333,6 +336,10 @@ namespace LabBuilderSetup
         void BuildPages()
         {
             pages.Add(PageWelcome());
+            pages.Add(PageFolders());      // lab manager (ADR 0015): first run / "Change folders..."
+            pages.Add(PageStart());        // new / edit / delete / image library
+            pages.Add(PageDeleteLab());
+            pages.Add(PageLibrary());
             pages.Add(PageInstall());
             pages.Add(PageDomain());
             pages.Add(PageNetwork());
@@ -454,7 +461,7 @@ namespace LabBuilderSetup
             tLibrary.TextChanged += (s, e) => UpdateDiskNote();
             return new Page
             {
-                Step = "Install & lab", Title = "Installation and lab folder", Subtitle = "Where LabBuilder and the virtual machines are stored", Content = t,
+                Step = "Lab", Title = "Lab name and build options", Subtitle = "The lab gets its own folder in the Labs folder; app and library folders come from the host settings", Content = t,
                 Enter = UpdateDiskNote,
                 Leave = () =>
                 {
@@ -469,6 +476,7 @@ namespace LabBuilderSetup
                     S.InstallDir = tInstall.Text.TrimEnd('\\'); S.LabName = tLabName.Text; S.LabRoot = tLabRoot.Text.TrimEnd('\\');
                     S.LibraryRoot = tLibrary.Text.TrimEnd('\\');
                     S.Parallel = cParallel.Checked; S.DiskType = rDiskDiff.Checked ? "Differencing" : "Dynamic";
+                    if (!CheckNewLabName()) return false;   // lab manager: unique name, <Labs folder>\<LabName> (ADR 0015)
                     return true;
                 }
             };
@@ -1001,6 +1009,10 @@ namespace LabBuilderSetup
             var sb = new StringBuilder();
             Func<ServerSpec, string> fmt = s => string.Format("  {0,-15} {6,-20} {1,-15} {2,2} vCPU {3,4} GB RAM {4,5} GB disk  {5}",
                 s.Name, S.Prefix + "." + s.HostOctet, s.Cpu, s.MemoryGB, s.DiskGB, string.Join(", ", s.Roles.Concat(s.Features)), OsCatalog.Display(s.Image));
+            sb.AppendLine("Action              : " + (S.Mode == "Edit"
+                ? "EDIT existing lab " + S.LabName + " - existing VMs are kept and extended; rows you removed are NOT deleted (use 'Delete a lab')" +
+                  (S.Reconstructed ? "; configuration was rebuilt - check NetBIOS name and roles" : "")
+                : "create a new lab in " + S.LabRoot));
             sb.AppendLine("Install folder      : " + S.InstallDir);
             sb.AppendLine("Lab name / folder   : " + S.LabName + "  /  " + S.LabRoot);
             sb.AppendLine("Image library       : " + S.LibraryRoot + "  (shared by all labs)");
@@ -1124,7 +1136,8 @@ namespace LabBuilderSetup
             return new Page { Step = "Build", Title = "Building the lab", Subtitle = "Live progress - the build can take one to two hours", Content = panel };
         }
 
-        string OutputDir { get { return Path.Combine(S.InstallDir, "output", S.LabName); } }
+        // Credentials/summary/reports: <LabRoot>\output for labs created with 1.4.0+, else <App>\output\<Lab> (ADR 0015).
+        string OutputDir { get { return !string.IsNullOrEmpty(S.OutputPath) ? S.OutputPath : Path.Combine(S.InstallDir, "output", S.LabName); } }
 
         void OpenPath(string path)
         {
@@ -1142,17 +1155,20 @@ namespace LabBuilderSetup
 
         void InstallAndBuild()
         {
-            string cfgPath = Path.Combine(S.InstallDir, @"config\lab.config.psd1");
+            // Each lab has its own config in its lab folder (ADR 0015); no shared config\lab.config.psd1 any more.
+            string cfgPath = S.Mode == "Edit" && !string.IsNullOrEmpty(S.ConfigPath) ? S.ConfigPath : Path.Combine(S.LabRoot, "lab.config.psd1");
+            string baseConfig = Path.Combine(S.InstallDir, @"config\lab.config.example.psd1");
             try
             {
                 Cursor = Cursors.WaitCursor;
                 Payload.ExtractTo(S.InstallDir);
+                Directory.CreateDirectory(Path.GetDirectoryName(cfgPath));
                 if (File.Exists(cfgPath))
                 {
                     string backup = cfgPath + ".bak-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
                     File.Copy(cfgPath, backup, true);
                 }
-                File.WriteAllText(cfgPath, S.ToPsd1(), Encoding.ASCII);
+                File.WriteAllText(cfgPath, S.ToPsd1(baseConfig), Encoding.ASCII);
             }
             catch (Exception ex)
             {
@@ -1172,8 +1188,8 @@ namespace LabBuilderSetup
             {
                 buildFinished = true;
                 MessageBox.Show(this, "LabBuilder is installed in " + S.InstallDir + " and the configuration is saved to\n" + cfgPath +
-                    "\n\nBuild the lab later from an elevated PowerShell console:\n\n  cd \"" + S.InstallDir + "\"\n  .\\scripts\\Invoke-LabBuild.ps1 -ConfigPath .\\config\\lab.config.psd1" +
-                    (S.GeneratePassword ? "" : " -LabAdminCredential (Get-Credential)") + "\n\nor run this wizard again and load the configuration.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    "\n\nBuild the lab later from an elevated PowerShell console:\n\n  cd \"" + S.InstallDir + "\"\n  .\\scripts\\Invoke-LabBuild.ps1 -LabName " + S.LabName +
+                    (S.GeneratePassword ? "" : " -LabAdminCredential (Get-Credential)") + "\n\nor run this wizard again and choose 'Edit an existing lab'.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 Close();
                 return;
             }
@@ -1296,7 +1312,9 @@ namespace LabBuilderSetup
             }
         }
 
-        void LoadConfig(string path)
+        bool LoadConfig(string path) { return LoadConfig(path, false); }
+
+        bool LoadConfig(string path, bool quiet)
         {
             try
             {
@@ -1310,11 +1328,13 @@ namespace LabBuilderSetup
                 if (data == null) throw new InvalidOperationException("Not a lab configuration.");
                 S = LabSettings.FromConfig(data, S);
                 RebindAll();
-                MessageBox.Show(this, "Loaded " + path + ".\nThe admin password is not stored in configurations; choose it on the Domain page.", Text);
+                if (!quiet) MessageBox.Show(this, "Loaded " + path + ".\nThe admin password is not stored in configurations; choose it on the Domain page.", Text);
+                return true;
             }
             catch (Exception ex)
             {
                 MessageBox.Show(this, "Could not load the configuration:\n" + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
             }
         }
 

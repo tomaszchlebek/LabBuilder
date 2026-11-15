@@ -1,6 +1,6 @@
 # Roadmap — LabBuilder after 1.1.0
 
-- **Date:** 2026-11-15 · **Status:** in progress — 1.1.1, 1.2.0 and 1.3.0 released · **Current release:** 1.3.0
+- **Date:** 2026-11-15 · **Status:** in progress — 1.1.1, 1.2.0, 1.3.0 and 1.4.0 released · **Current release:** 1.4.0
 
 The requester's list was reordered and merged so that shared groundwork is built **once** and every later version reuses
 it. Each version ships the usual way: requirements → code + tests → docs/DEVLOG/CHANGELOG/ADR → exe rebuild → tester
@@ -15,7 +15,7 @@ host run → **commit, tag and GitHub release** (requester: "update github repos
 | **1.3.0** ✔ | 1.1.6 | **Parallel build** (downloads, base images, disk copies, member servers, workstations) + progress events + differencing-disk option (released 2026-11-15, ADR 0014) | Needs the final image pipeline from 1.2.0; events reused by wizard and web UI |
 | **1.3.1** | 1.1.4 | **Host compatibility** Server 2019 / 2022 / 2025 with Hyper-V; nested-virtualization option | Test hosts are built *by LabBuilder itself* (needs OS choice); tests the final parallel engine once |
 | **1.4.1** | new (2026-11-15) | **Faster domain controllers and CA**: role-ready base images (AD DS, DNS, AD CS pre-installed, sysprep `/mode:vm`) + member servers/workstations created while the forest is promoted | Needs the 1.3.0 engine and the library; small, self-contained after the 1.4.0 rework |
-| **1.4.0** | 1.2.0 + redesign | **Lab manager**: first-run App/Labs/Library folders, start page *new / edit / delete lab*, one folder per lab under the Labs folder, library inventory, **discover** and **delete** labs (ADR 0015, decisions D6-D8) | Uses the manifest/tags from 1.2.0; the requester's redesign (2026-11-15) is the same inventory |
+| **1.4.0** ✔ | 1.2.0 + redesign | **Lab manager**: first-run App/Labs/Library folders, start page *new / edit / delete lab*, one folder per lab under the Labs folder, library inventory, **discover** and **delete** labs (ADR 0015, decisions D6-D8; released 2026-11-15) | Uses the manifest/tags from 1.2.0; the requester's redesign (2026-11-15) is the same inventory |
 | **1.5.0** | 1.5.0 | **IT Portal injection**: import a portal package (any version), deploy to a chosen IIS member server, agent MSI to all domain computers by GPO | Reuses IIS, SQL Express (1.1.0) and lab CA certificates — mostly integration work |
 | **1.6.0** | 1.3.0 | **Exchange Server 2019 CU15 or Subscription Edition** (trial) member servers | Heaviest role; reuses media downloader (1.2.0), OS choice, parallel engine |
 | ~~1.4.0~~ | 1.4.0 | SQL Express — **done in 1.1.0**, skipped | — |

@@ -5,6 +5,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-11-15
+
+### Added
+- **Lab manager** (FR-27..FR-30, ADR 0015, requester redesign):
+  - **First run:** a *Folders* page sets the **App, Labs and Library folders** (`%ProgramData%\LabBuilder\settings.json`; defaults
+    `C:\LabBuilder`, `<data drive>:\LabBuilder-Labs`, `<data drive>:\LabBuilder-Library`); *Change folders...* later.
+  - **Start page:** *Create a new lab*, *Edit an existing lab*, *Delete a lab*, *Show the image library*, with the list of labs on
+    the host (domain, VMs and how many run, disk type, last phase, size, folder).
+  - **One folder per lab** `<Labs folder>\<LabName>\` with its own `lab.config.psd1`, VMs, logs, reports and `output\` (credentials) -
+    labs no longer share `<App>\config\lab.config.psd1` (a second lab overwrote the first one's settings).
+  - **Edit:** loads the lab's own config; name, domain, network and disk type are fixed; add servers, workstations and roles; build
+    again (finished work is skipped). Removed rows are not deleted.
+  - **Delete:** preview of everything that goes, confirmation by typing the lab name; VMs (from lab.json and every VM tagged
+    `LabBuilder:<Lab>`), checkpoints, disks, switch if unused, the lab's files and folder, its credentials; never the image library.
+  - **Image library view:** per OS the ISO (size, date) and base image (Windows build, date, built from the current ISO or not, VMs
+    whose differencing disks use it) plus unknown ISO files in the library folder.
+  - **Labs from 1.0-1.3** (e.g. in `D:\HyperVLab`) are found through their tagged VMs and **registered in place** (decision D7). Their
+    config is **restored** from the old shared config or the wizard's `.bak-<time>` copies when one matches the lab's name and folder,
+    otherwise **rebuilt** from `lab.json` + Hyper-V (names, OS, IPs, sizes) - roles and NetBIOS name are then confirmed in the wizard.
+- `scripts/Get-LabInventory.ps1` (labs + library as JSON), `Invoke-LabBuild.ps1 -LabName`, `Remove-Lab.ps1 -LabName [-Force]`.
+- Config `Paths.OutputPath` (credentials/summary/reports folder; '' = `<App>\output\<Lab>` as before).
+
+### Changed
+- Wizard page *Install & lab* is now *Lab* (lab name + build options; app, lab and library paths come from the host settings).
+- The host conflict check also looks at the lab's own output folder.
+
 ## [1.3.0] — 2026-11-15
 
 ### Added

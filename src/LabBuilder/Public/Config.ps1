@@ -266,6 +266,8 @@ function Test-LabConfig {
     if ([int]$Config.SchemaVersion -ne 2) { $errors.Add('Config SchemaVersion must be 2 (DomainControllers / MemberServers / Workstations layout). Start from config\lab.config.example.psd1.'); return $errors.ToArray() }
     if ([string]$Config.LabName -notmatch '^[A-Za-z0-9][A-Za-z0-9-]{0,14}$') { $errors.Add("LabName '$($Config.LabName)' must be 1-15 letters, digits or '-'.") }
     if ([string]$Config.Paths.LabRoot -notmatch '^[A-Za-z]:\\') { $errors.Add("Paths.LabRoot '$($Config.Paths.LabRoot)' must be an absolute path on a local drive of the host, e.g. D:\HyperVLab.") }
+    $outPath = [string]$Config.Paths.OutputPath
+    if ($outPath -and $outPath -notmatch '^[A-Za-z]:\\') { $errors.Add("Paths.OutputPath '$outPath' must be an absolute local path (or empty for <App>\output\<LabName>).") }
     $lib = [string]$Config.Paths.LibraryRoot
     if ($lib -and $lib -notmatch '^[A-Za-z]:\\') { $errors.Add("Paths.LibraryRoot '$lib' must be an absolute path on a local drive of the host (or empty for <LabRoot drive>:\LabBuilder-Library).") }
     elseif ($lib -and [string]$Config.Paths.LabRoot -and ($lib.TrimEnd('\') + '\').StartsWith(([string]$Config.Paths.LabRoot).TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {

@@ -21,7 +21,11 @@
 | Page | You decide |
 |------|-----------|
 | Welcome | prerequisite check (must be all OK/WARN) |
-| Install & lab | install folder (default `C:\LabBuilder`), lab name, lab folder (VM disks, logs, `lab.json`), **image library folder** shared by all labs (default `<lab drive>:\LabBuilder-Library`: ISOs + one base image per OS); **build options**: VMs in parallel (default on), VM disks as independent dynamic copies (default) or **differencing disks** (fast, small; the VMs then depend on the library) |
+| Folders | **first run only** (later: *Change folders...* on the start page): **App folder** (default `C:\LabBuilder`), **Labs folder** (default `<data drive>:\LabBuilder-Labs`, one subfolder per lab), **Library folder** (default `<data drive>:\LabBuilder-Library`, ISOs + one base image per OS, shared by all labs) - saved in `%ProgramData%\LabBuilder\settings.json` |
+| Start | **create a new lab**, **edit an existing lab**, **delete a lab**, or **show the image library**; list of labs on the host (domain, VMs, disk type, last phase, size, folder) and a library summary |
+| Delete lab | (delete only) what will be removed; type the lab name to confirm; live log |
+| Image library | (library only) per OS: ISO, base image, Windows build, VMs whose differencing disks use it; unknown ISO files |
+| Lab | lab name (new lab: folder `<Labs folder>\<LabName>`; edit: fixed); **build options**: VMs in parallel (default on), VM disks as independent dynamic copies (default) or **differencing disks** (fast, small; the VMs then depend on the library) |
 | Domain | forest FQDN, NetBIOS name, generated or entered lab administrator password |
 | Network | **isolated (Private)** or **host-reachable (Internal)** switch, switch name, /24 subnet |
 | Domain controllers | **how many (1–5)**, per DC: name, **operating system (Windows Server 2025 / 2022 / 2019)**, IP, **vCPU, RAM, disk (dynamic)**, extra roles (ADCS, IIS, DHCP, File Server, features) |
@@ -32,16 +36,21 @@
 | ISOs | lists the ISOs this lab needs; missing ones are downloaded from Microsoft, or imported from a pre-downloaded folder |
 | Summary | everything, resource totals vs host, VM regional settings (from this host); validated with the build rules |
 
-3. Click **Install & build**. The wizard installs LabBuilder into the install folder, saves
-   `config\lab.config.psd1`, and runs the build with a live log and phase list. Typical duration after ISOs are present:
-   30–90 minutes depending on the number of VMs.
-4. When it finishes, use **Open output folder / Lab summary / Validation report**.
+3. Click **Install & build**. The wizard installs LabBuilder into the App folder, saves the lab's own configuration
+   `<Labs folder>\<LabName>\lab.config.psd1`, and runs the build with a live log, phase list and VM list. Typical duration after
+   ISOs are present: 30–90 minutes depending on the number of VMs.
+4. When it finishes, use **Open output folder / Lab summary / Validation report** (`<Labs folder>\<LabName>\output\`).
 
-*Load configuration… / Save configuration…* store your answers (never the password) so a lab can be rebuilt the same way.
-*Only install … do not build now* installs and saves the configuration; build later with the script (§3).
+*Load configuration… / Save configuration…* store your answers (never the password) so a lab can be repeated elsewhere.
+*Only install … do not build now* installs and saves the configuration; build later with `Invoke-LabBuild.ps1 -LabName <LabName>` (§3).
 
-If the build stops, fix the cause (see the log) and run the wizard again with the same settings (Load configuration from
-`<install>\config\lab.config.psd1`) — finished work is detected and skipped.
+If the build stops, fix the cause (see the log), run the wizard again and choose **Edit an existing lab** → the lab → *Install &
+build* - finished work is detected and skipped.
+
+**Labs built with 1.0–1.3** (e.g. `D:\HyperVLab`) appear in the list automatically (found through their tagged VMs) and stay where
+they are. Their configuration is restored from the old shared `C:\LabBuilder\config\lab.config.psd1` or its `.bak-<time>` copies when
+one matches the lab; otherwise *Edit* rebuilds it from `lab.json` + Hyper-V and you confirm the **roles** of each server and the
+**NetBIOS name** before building again.
 
 ## 3. Build with the scripts (alternative)
 
@@ -49,14 +58,17 @@ Elevated PowerShell on the host, in the install folder (or a copy of the reposit
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\scripts\Invoke-LabBuild.ps1 -ConfigPath .\config\lab.config.psd1
+.\scripts\Invoke-LabBuild.ps1 -LabName QALAB                               # a lab known to this host (its own config)
+.\scripts\Invoke-LabBuild.ps1 -ConfigPath D:\LabBuilder-Labs\QALAB\lab.config.psd1
+.\scripts\Get-LabInventory.ps1 -AsObject | Select-Object -ExpandProperty Labs | Format-Table Name, Domain, LabRoot, Source
 # or with the example defaults:
 .\scripts\Invoke-LabBuild.ps1 -DomainFqdn lab.test -DomainNetbios LABTEST
 ```
 
 | Parameter | Use |
 |-----------|-----|
-| `-ConfigPath` | config file (wizard output or a copy of `config\lab.config.example.psd1`) |
+| `-LabName` | a lab of this host (Labs folder or registered); uses its own `lab.config.psd1` |
+| `-ConfigPath` | config file (a lab's `lab.config.psd1` or a copy of `config\lab.config.example.psd1`) |
 | `-DomainFqdn`, `-DomainNetbios`, `-LabRoot` | override config values |
 | `-LabAdminCredential (Get-Credential)` | choose the lab admin password |
 | `-IsoSource F:\LabIso` | import pre-downloaded ISOs |
@@ -164,8 +176,12 @@ Lab administrator password: `(Import-Clixml .\output\TESTLAB\lab-admin.cred.xml)
 
 ## 8. Teardown
 
+Easiest: wizard → start page → **Delete a lab** (preview, type the lab name). From PowerShell:
+
 ```powershell
-.\scripts\Remove-Lab.ps1 -ConfigPath .\config\lab.config.psd1 -WhatIf     # preview
+.\scripts\Remove-Lab.ps1 -LabName QALAB -WhatIf                           # preview
+.\scripts\Remove-Lab.ps1 -LabName QALAB                                   # VMs, disks, switch if unused, lab folder + credentials (keeps the library)
+.\scripts\Remove-Lab.ps1 -ConfigPath .\config\lab.config.psd1 -WhatIf     # older form: by config file
 .\scripts\Remove-Lab.ps1 -ConfigPath .\config\lab.config.psd1             # VMs, disks, switch, lab.json (keeps the image library)
 .\scripts\Remove-Lab.ps1 -ConfigPath .\config\lab.config.psd1 -IncludeLibrary -RemoveOutput
 ```

@@ -4,10 +4,14 @@
 
 ```
  Dedicated Hyper-V host
- ├─ LabBuilderSetup.exe (wizard, elevated) ──writes──▶ <install>\config\lab.config.psd1
- │        │ runs                                            (tester choices; BaseConfig = example)
+ ├─ %ProgramData%\LabBuilder\settings.json   App / Labs / Library folders, registered 1.0-1.3 labs (ADR 0015)
+ ├─ LabBuilderSetup.exe (wizard, elevated): Folders -> Start (new | edit | delete | library) -> lab pages -> build
+ │        │ writes <Labs>\<Lab>\lab.config.psd1 (tester choices; BaseConfig = <App>\config\lab.config.example.psd1)
  │        ▼
- │  <install>\scripts\Invoke-LabBuild.ps1  ──▶ LabBuilder module (phases)
+ │  <App>\scripts\Invoke-LabBuild.ps1 [-LabName]  ──▶ LabBuilder module (phases)
+ │  <App>\scripts\Get-LabInventory.ps1 (labs + library JSON), Remove-Lab.ps1 -LabName
+ │
+ ├─ <Labs>\<Lab>\          one folder per lab: lab.config.psd1, lab.json, state.json, VMs\, Logs\, Reports\, output\ (credentials)
  │
  ├─ <Library>\ISO          image library, SHARED BY ALL LABS (ADR 0013): evaluation ISOs + iso-manifest.json (SHA-256), SQL\
  ├─ <Library>\BaseImages   <OS>.vhdx per OS (Server2025/2022/2019, Win11LTSC, Win10; 32 GB, read-only) + .json (version, language, ISO SHA-256)
@@ -30,7 +34,8 @@ network [0005](adr/0005-isolated-private-network.md), secrets [0006](adr/0006-la
 topology and roles [0009](adr/0009-tester-defined-topology-and-role-catalog.md), locale [0010](adr/0010-locale-from-hyper-v-host.md),
 wizard [0011](adr/0011-wizard-installer-exe.md), SQL Server [0012](adr/0012-sql-server-express-role.md),
 image library + OS choice + lab manifest [0013](adr/0013-shared-image-library-and-os-choice.md),
-parallel build + differencing disks + progress [0014](adr/0014-parallel-build-differencing-disks-progress.md).
+parallel build + differencing disks + progress [0014](adr/0014-parallel-build-differencing-disks-progress.md),
+lab manager [0015](adr/0015-lab-manager-folders-and-start-page.md).
 
 ## 2. Components
 
@@ -42,7 +47,10 @@ parallel build + differencing disks + progress [0014](adr/0014-parallel-build-di
 | `scripts/Publish-LabRelease.ps1` | Maintainer release: checks, tests, exe build, commit, tag, GitHub release |
 | `scripts/Invoke-LabBuild.ps1` | Entry point: config, secrets, account plan, phases, summary |
 | `scripts/Test-LabConfigFile.ps1` | Validation + resolved host locale (wizard uses it) |
-| `scripts/Get-LabIso.ps1`, `scripts/Remove-Lab.ps1` | Pre-download, teardown |
+| `scripts/Get-LabIso.ps1`, `scripts/Remove-Lab.ps1` | Pre-download, teardown (`-LabName`: delete a lab from the inventory) |
+| `scripts/Get-LabInventory.ps1` | Lab manager back end: host settings, labs, image library as JSON; save folders, register 1.0-1.3 labs, restore/rebuild a lost config (ADR 0015) |
+| `src/LabBuilder/Public/LabManager.ps1` | Host settings, `Get-LabInventory`, `Get-LabLibraryInventory`, `Get-LabOutputPath`, `Restore-LabLegacyConfig`, `New-LabConfigFromInventory`, `Remove-LabFromInventory` |
+| `installer/src/LabManagerPages.cs` | Wizard pages Folders, Start, Delete lab, Image library; edit/new mode logic |
 | `config/lab.config.example.psd1` | Schema v2 defaults (topology, roles, ISO links) |
 | `src/LabBuilder/Public/Config.ps1` | Load (BaseConfig layering, overrides), validate, topology → VM definitions |
 | `src/LabBuilder/Public/Secrets.ps1` | Passwords, account plan (domain admins + test users), file ACL, unattend encoding |
@@ -120,4 +128,5 @@ The wizard passes an entered admin password to the build via **stdin** only (ADR
 | FR-24 | `Invoke-LabParallel`; parallel phases Iso, BaseImages, `New-LabVMSet`, `Initialize-LabMemberServer`, `Initialize-LabWorkstation`; locks VhdMount / CertTemplate / log writes |
 | FR-25 | `Disks.Type`, `New-LabVM` (differencing branch), `Get-LabBaseImageUser` (protection in base rebuild and `Remove-LabEnvironment`), validation disk check |
 | FR-26 | `Write-LabProgress` (`progress.jsonl`, `##LBP` lines), wizard Build page VM list |
+| FR-27..FR-30 | `LabManager.ps1`, `Get-LabInventory.ps1`, `Invoke-LabBuild.ps1 -LabName`, `Remove-Lab.ps1 -LabName`, `LabManagerPages.cs`, `Paths.OutputPath` |
 | dynamic disks (IN-6/7/12) | `New-LabVM` (copy + `Resize-VHD` + `Resize-Partition`), validation |

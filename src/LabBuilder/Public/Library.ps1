@@ -218,14 +218,17 @@ function Test-LabHostConflict {
     $fix = "Choose another lab name, lab folder and switch name/subnet for the new lab (it reuses the image library, so no new downloads), " +
            "or remove the old lab first: scripts\Remove-Lab.ps1 -ConfigPath <old lab config> -RemoveOutput."
 
-    # 1. Same lab name, other domain: output\<LabName> holds the old lab's accounts (and VM names would collide).
-    if ($OutputRoot) {
-        $acc = Join-Path $OutputRoot "$lab\lab-accounts.csv"
+    # 1. Same lab name, other domain: output\<LabName> (1.0-1.3) or the lab's own output folder (1.4.0+, Paths.OutputPath)
+    #    holds the old lab's accounts (and VM names would collide).
+    $accFiles = @()
+    if ($OutputRoot) { $accFiles += (Join-Path $OutputRoot "$lab\lab-accounts.csv") }
+    if ([string]$Config.Paths.OutputPath) { $accFiles += (Join-Path ([string]$Config.Paths.OutputPath) 'lab-accounts.csv') }
+    foreach ($acc in ($accFiles | Select-Object -Unique)) {
         if (Test-Path -LiteralPath $acc) {
             $first = @(Import-Csv -LiteralPath $acc | Select-Object -First 1)
             if ($first.Count -gt 0 -and [string]$first[0].UserPrincipalName -notlike "*@$upn") {
                 $old = ([string]$first[0].UserPrincipalName -split '@', 2)[-1]
-                $errors.Add("Lab name '$lab' is already used on this host by a lab of domain '$old' (credentials in $(Join-Path $OutputRoot $lab)). $fix")
+                $errors.Add("Lab name '$lab' is already used on this host by a lab of domain '$old' (credentials in $(Split-Path -Parent $acc)). $fix")
             }
         }
     }

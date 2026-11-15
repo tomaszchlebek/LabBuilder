@@ -25,10 +25,11 @@ driven by a Windows **setup wizard (`LabBuilderSetup.exe`)** where the tester ch
 ## Quick start
 
 1. Download `LabBuilderSetup.exe` from the [latest release](https://github.com/tomaszchlebek/LabBuilder/releases/latest) (or build it: `installer\build.ps1`), copy it to the Hyper-V host and run it (it asks for administrator rights).
-2. Answer the wizard pages: install folder → domain → network → domain controllers → member servers & roles →
-   accounts → workstations → ISOs → summary.
-3. Click **Install & build** and watch the progress. Credentials, summary and validation report are in
-   `<install folder>\output\<LabName>\`.
+2. First run: choose the **App, Labs and Library folders**. Then the **start page**: *create a new lab*, *edit* or *delete* an
+   existing one, or look at the *image library*.
+3. New lab: lab name → domain → network → domain controllers → member servers & roles → accounts → workstations → ISOs → summary.
+4. Click **Install & build** and watch the progress. Each lab lives in its own folder `<Labs folder>\<LabName>\` - configuration,
+   VM disks, logs, reports and credentials (`output\`).
 
 Scripts can also be used directly (elevated PowerShell on the host):
 

@@ -22,6 +22,9 @@
     NetBIOS name (overrides Domain.NetBiosName), e.g. LABTEST.
 .PARAMETER ConfigPath
     Config file; default config\lab.config.psd1, else config\lab.config.example.psd1.
+.PARAMETER LabName
+    Build/resume a lab known to this host (ADR 0015): its own config <Labs folder>\<LabName>\lab.config.psd1 (or a registered
+    1.0-1.3 lab's config), found through %ProgramData%\LabBuilder\settings.json. Use instead of -ConfigPath.
 .PARAMETER LabRoot
     Folder of this lab on the host: VMs, logs, reports, lab.json (overrides Paths.LabRoot). ISOs and base images are in
     the shared image library (Paths.LibraryRoot, default <LabRoot drive>:\LabBuilder-Library).
@@ -45,6 +48,7 @@ param(
     [string]$DomainFqdn,
     [string]$DomainNetbios,
     [string]$ConfigPath,
+    [string]$LabName,
     [string]$LabRoot,
     [pscredential]$LabAdminCredential,
     [switch]$AdminPasswordFromStdin,
@@ -67,6 +71,12 @@ if ($AdminPasswordFromStdin) {
 
 $fqdnOverride = ''; if ($DomainFqdn) { $fqdnOverride = $DomainFqdn.Trim().TrimEnd('.').ToLowerInvariant() }
 $nbOverride = ''; if ($DomainNetbios) { $nbOverride = $DomainNetbios.Trim().ToUpperInvariant() }
+if ($LabName) {
+    $lab = @(Get-LabInventory -Settings (Get-LabHostSettings) -NoSize | Where-Object { $_.Name -ieq $LabName }) | Select-Object -First 1
+    if (-not $lab) { throw "Lab '$LabName' is not known on this host (Labs folder, registered labs, tagged VMs)." }
+    if (-not $lab.HasConfig) { throw "Lab '$LabName' has no config ($($lab.ConfigPath)) - open it in LabBuilderSetup.exe (Edit) to reconstruct it." }
+    $ConfigPath = $lab.ConfigPath
+}
 $ConfigPath = Resolve-LabConfigPath -RepoRoot $repo -ConfigPath $ConfigPath
 $config = Import-LabConfig -Path $ConfigPath -Overrides @{
     'Domain.Fqdn'        = $fqdnOverride
@@ -82,7 +92,8 @@ if ($errors.Count -gt 0) {
 }
 if ($IsoSource -and -not (Test-Path -LiteralPath $IsoSource)) { throw "IsoSource folder not found: $IsoSource" }
 
-$outDir = Join-Path $repo "output\$($config.LabName)"
+# Credentials, summary, reports: <LabRoot>\output for labs created with 1.4.0+ (Paths.OutputPath), else <App>\output\<Lab> (ADR 0015).
+$outDir = Get-LabOutputPath -Config $config -AppFolder $repo
 if (-not (Test-Path -LiteralPath $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 Start-Transcript -Path (Join-Path $outDir "build-$stamp.transcript.log") | Out-Null
