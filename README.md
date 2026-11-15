@@ -6,14 +6,18 @@ driven by a Windows **setup wizard (`LabBuilderSetup.exe`)** where the tester ch
 - **Active Directory forest** with **1–5 domain controllers** (your FQDN + NetBIOS name, DNS on every DC)
 - **Member servers** (0–10) with the **roles you tick per server**: AD CS (Enterprise Root CA), IIS (HTTPS from the lab CA),
   DHCP, File Server, **SQL Server 2025 Express** (unattended, with your SQL options) — plus any extra Windows features
-- **Windows 11 Enterprise LTSC workstations** (0–20), domain-joined, vTPM + Secure Boot
+- **Operating system per server**: Windows Server **2025, 2022 or 2019** (evaluation)
+- **Workstations** (0–20), domain-joined, vTPM + Secure Boot: **Windows 11 Enterprise LTSC**, or **Windows 10 Enterprise**
+  from your own ISO (Microsoft no longer offers a Windows 10 evaluation)
 - **Dedicated domain admin accounts** and **domain test users** (random names, generated passwords), security groups,
   optional local-admin rights for the testers
 - vCPU, RAM and **dynamic** disk size per server and for the workstations
 - **Isolated** (Private switch) or **host-reachable** (Internal switch) network — tester's choice
 - VM regional settings and time zone **taken from the Hyper-V host**
-- OS media **downloaded from the Microsoft Evaluation Center** (Windows Server 2025, Windows 11 Enterprise LTSC),
-  verified (HTTPS, Microsoft hosts only, size, SHA-256) and stored on the host
+- OS media **downloaded from the Microsoft Evaluation Center**, verified (HTTPS, Microsoft hosts only, size, SHA-256)
+  and kept in a **shared image library** on the host: each ISO is downloaded and each base image built **once** and
+  reused by every later lab
+- Each lab records itself in `<lab folder>\lab.json` and tags its VMs (`LabBuilder:<LabName>` in the VM notes)
 - Post-build **validation report**
 
 ## Quick start

@@ -1,8 +1,9 @@
 function New-LabVM {
     <#
     .SYNOPSIS
-        Creates one lab VM: differencing disk on the base image, unattend.xml injected, Gen 2, Secure Boot,
-        vTPM for Windows 11, connected only to the lab switch; then starts it. Skips an existing VM.
+        Creates one lab VM: dynamic copy of the library base image of its OS (ADR 0008/0013), unattend.xml injected,
+        Gen 2, Secure Boot, vTPM for workstations, notes tagged LabBuilder:<LabName>, connected only to the lab switch;
+        then starts it. Skips an existing VM (and tags it if it came from LabBuilder 1.0/1.1).
     #>
     [CmdletBinding()]
     param(
@@ -15,6 +16,8 @@ function New-LabVM {
     $existing = Get-VM -Name $vmName -ErrorAction SilentlyContinue
     if ($existing) {
         if ($existing.State -ne 'Running') { Start-VM -Name $vmName | Out-Null }
+        $note = Get-LabVmNote -Config $Config -Definition $Definition
+        if (-not ([string]$existing.Notes).StartsWith("LabBuilder:$($Config.LabName) ")) { Set-VM -Name $vmName -Notes $note }   # tag VMs of 1.0/1.1 labs (FR-23)
         Write-LabLog "VM $vmName exists ($($existing.State))." -Level OK
         return
     }
@@ -46,7 +49,7 @@ function New-LabVM {
     if (Test-Path -LiteralPath $sidecar) { $imageLanguage = [string]((Get-Content -LiteralPath $sidecar -Raw | ConvertFrom-Json).Language) }
     $locale = Resolve-LabLocale -Config $Config -ImageLanguage $imageLanguage
     Write-LabLog "  locale: UI $($locale.UILanguage), input $($locale.InputLocale), system $($locale.SystemLocale), user $($locale.UserLocale), time zone '$($locale.TimeZone)'"
-    $xml = New-LabUnattendXml -Image $Definition.Image -ComputerName $Definition.Name -AdminCredential $AdminCredential -Locale $locale
+    $xml = New-LabUnattendXml -Image $Definition.Kind -ComputerName $Definition.Name -AdminCredential $AdminCredential -Locale $locale
 
     $disk = Mount-VHD -Path $diskPath -Passthru | Get-Disk
     try {
@@ -72,9 +75,9 @@ function New-LabVM {
         -SwitchName $Config.Network.SwitchName -Path (Join-Path $root 'VMs') | Out-Null
     Set-VM -Name $vmName -ProcessorCount $Definition.ProcessorCount -StaticMemory -AutomaticCheckpointsEnabled $false `
         -AutomaticStartAction Nothing -AutomaticStopAction ShutDown `
-        -Notes "LabBuilder lab '$($Config.LabName)': $($Definition.Role) $($Definition.Name) $($Definition.IPAddress)"
+        -Notes (Get-LabVmNote -Config $Config -Definition $Definition)
     Set-VMFirmware -VMName $vmName -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows
-    if ($Definition.Image -eq 'Client') {
+    if ($Definition.Kind -eq 'Client') {   # vTPM for Windows 10/11
         Set-VMKeyProtector -VMName $vmName -NewLocalKeyProtector
         Enable-VMTPM -VMName $vmName
     }

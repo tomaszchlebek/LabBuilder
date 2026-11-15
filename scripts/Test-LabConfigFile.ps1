@@ -12,7 +12,10 @@
     .\scripts\Test-LabConfigFile.ps1 -ConfigPath .\config\lab.config.psd1
 #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ConfigPath)
+param(
+    [Parameter(Mandatory)][string]$ConfigPath,
+    [string]$OutputRoot     # <install>\output: also check this host for a conflicting lab (Test-LabHostConflict)
+)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -21,6 +24,7 @@ Import-Module (Join-Path $repo 'src\LabBuilder\LabBuilder.psd1') -Force
 try {
     $config = Import-LabConfig -Path $ConfigPath
     $errors = @(Test-LabConfig -Config $config -Scope Full)
+    if ($errors.Count -eq 0) { $errors = @(Test-LabHostConflict -Config $config -OutputRoot $OutputRoot) }
 } catch {
     $errors = @("Config file cannot be read: $($_.Exception.Message)")
     $config = $null

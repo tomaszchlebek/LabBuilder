@@ -37,12 +37,17 @@ function Invoke-LabPhase {
     switch ($Name) {
         'Preflight'        { $output = Test-LabHostPrerequisites -Config $Config
                              Set-LabLogFile -Path (Join-Path $root ("Logs\labbuilder-{0}.log" -f (Get-Date -Format 'yyyyMMdd'))) }
-        'Iso'              { if ($IsoSource) { Import-LabIso -Config $Config -Source $IsoSource }
-                             $output = Save-LabIso -Config $Config -Destination (Join-Path $root 'ISO')
+        'Iso'              { # Everything goes into the shared image library (ADR 0013); 1.0/1.1 media is moved there first.
+                             $lib = Get-LabLibraryIsoFolder -Config $Config
+                             Move-LabLegacyMedia -Config $Config
+                             if ($IsoSource) { Import-LabIso -Config $Config -Source $IsoSource }
+                             $output = Save-LabIso -Config $Config -Destination $lib -ImportSupplied
                              Confirm-LabHostIso -Config $Config
                              if (Test-LabSqlRequired -Config $Config) {
-                                 if ($IsoSource) { Import-LabSqlMedia -Config $Config -Source $IsoSource }
-                                 $null = Save-LabSqlMedia -Config $Config -Destination (Join-Path $root 'ISO')
+                                 Invoke-LabLibraryLock -Name 'SQL' -ScriptBlock {
+                                     if ($IsoSource) { Import-LabSqlMedia -Config $Config -Source $IsoSource }
+                                     $null = Save-LabSqlMedia -Config $Config -Destination $lib
+                                 }
                              } }
         'BaseImages'       { New-LabBaseImage -Config $Config }
         'Network'          { New-LabNetwork -Config $Config }
@@ -52,6 +57,7 @@ function Invoke-LabPhase {
         'Validate'         { $output = Test-LabEnvironment -Config $Config -AdminCredential $AdminCredential -AccountsJson $AccountsJson -SqlSaCredential $SqlSaCredential }
     }
     Set-LabPhaseState -Config $Config -Phase $Name -Status 'Completed' -Seconds ([int]$sw.Elapsed.TotalSeconds)
+    Write-LabManifest -Config $Config -Phase $Name   # <LabRoot>\lab.json (FR-23)
     Write-LabLog ('=== Phase {0} completed in {1:N1} min ===' -f $Name, $sw.Elapsed.TotalMinutes) -Level OK
     return $output
 }
@@ -73,14 +79,14 @@ function Set-LabPhaseState {
 function Remove-LabEnvironment {
     <#
     .SYNOPSIS
-        Tears the lab down (FR-15): only the VMs named in the config, their disks and the lab switch.
-        ISOs and base images are kept unless requested.
+        Tears the lab down (FR-15): only the VMs named in the config, their disks, the lab switch and lab.json.
+        The shared image library is kept; -IncludeLibrary also deletes the ISOs and base images THIS lab uses from the
+        library (other labs on the host that use them will download/build them again) - ADR 0013.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
         [Parameter(Mandatory)][string]$ConfigJson,
-        [switch]$IncludeBaseImages,
-        [switch]$IncludeIso
+        [Alias('IncludeBaseImages', 'IncludeIso')][switch]$IncludeLibrary
     )
 
     $Config = ConvertTo-LabConfigObject -InputObject $ConfigJson
@@ -112,24 +118,35 @@ function Remove-LabEnvironment {
         }
     }
 
-    if ($IncludeBaseImages) {
-        foreach ($key in @('Server', 'Client')) {
-            $vhd = Get-LabBaseImagePath -Config $Config -Image $key
-            if ((Test-Path -LiteralPath $vhd) -and $PSCmdlet.ShouldProcess($vhd, 'Delete base image')) {
-                Set-ItemProperty -LiteralPath $vhd -Name IsReadOnly -Value $false
-                Remove-Item -LiteralPath $vhd, "$vhd.json" -Force -ErrorAction SilentlyContinue
-                Write-LabLog "  removed base image $vhd"
+    if ($IncludeLibrary) {
+        $isoDir = Get-LabLibraryIsoFolder -Config $Config
+        $cmdlet = $PSCmdlet   # inside the lock blocks $PSCmdlet would be the lock function's (WhatIf would be lost)
+        foreach ($key in (Get-LabRequiredImageKey -Config $Config)) {
+            Invoke-LabLibraryLock -Name "Base-$key" -ScriptBlock {
+                $vhd = Get-LabBaseImagePath -Config $Config -Image $key
+                if ((Test-Path -LiteralPath $vhd) -and $cmdlet.ShouldProcess($vhd, 'Delete base image from the shared library')) {
+                    Set-ItemProperty -LiteralPath $vhd -Name IsReadOnly -Value $false
+                    Remove-Item -LiteralPath $vhd, "$vhd.json" -Force -ErrorAction SilentlyContinue
+                    Write-LabLog "  removed base image $vhd"
+                }
+            }
+            Invoke-LabLibraryLock -Name "Iso-$key" -ScriptBlock {
+                $iso = Join-Path $isoDir ([string]$Config.Iso.Images.$key.FileName)
+                if ((Test-Path -LiteralPath $iso) -and $cmdlet.ShouldProcess($iso, 'Delete ISO from the shared library')) {
+                    Remove-Item -LiteralPath $iso -Force
+                    Invoke-LabLibraryLock -Name 'IsoManifest' -TimeoutMinutes 10 -ScriptBlock {
+                        $map = Read-LabIsoManifest -Folder $isoDir
+                        $map.Remove([string]$Config.Iso.Images.$key.FileName)
+                        Write-LabIsoManifest -Folder $isoDir -Map $map
+                    }
+                    Write-LabLog "  removed ISO $iso"
+                }
             }
         }
     }
-    if ($IncludeIso) {
-        $isoDir = Join-Path $root 'ISO'
-        if ((Test-Path -LiteralPath $isoDir) -and $PSCmdlet.ShouldProcess($isoDir, 'Delete ISO folder on host')) {
-            Remove-Item -LiteralPath $isoDir -Recurse -Force
-            Write-LabLog "  removed $isoDir"
-        }
+    foreach ($f in 'state.json', 'lab.json') {
+        $p = Join-Path $root $f
+        if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force }
     }
-    $state = Join-Path $root 'state.json'
-    if (Test-Path -LiteralPath $state) { Remove-Item -LiteralPath $state -Force }
     Write-LabLog "=== Lab $($Config.LabName) removed ===" -Level OK
 }

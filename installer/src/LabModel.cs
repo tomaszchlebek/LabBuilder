@@ -17,8 +17,36 @@ namespace LabBuilderSetup
         public static string Header(string role) { return role == "FileServer" ? "File Server" : role; }
     }
 
+    /// <summary>OS catalog keys (Iso.Images in the example config, ADR 0013) and their display names.</summary>
+    public static class OsCatalog
+    {
+        public static readonly string[] ServerKeys = new[] { "Server2025", "Server2022", "Server2019" };
+        public static readonly string[] ClientKeys = new[] { "Win11LTSC", "Win10" };
+        public const string DefaultServer = "Server2025";
+        public const string DefaultClient = "Win11LTSC";
+        public const string Supplied = "Win10";   // no Microsoft evaluation - the tester supplies the ISO
+        public static string Display(string key)
+        {
+            switch (key)
+            {
+                case "Server2025": return "Windows Server 2025";
+                case "Server2022": return "Windows Server 2022";
+                case "Server2019": return "Windows Server 2019";
+                case "Win11LTSC": return "Windows 11 Enterprise LTSC";
+                case "Win10": return "Windows 10 Enterprise (your ISO)";
+                default: return key;
+            }
+        }
+        public static string KeyOf(string display)
+        {
+            foreach (var k in ServerKeys.Concat(ClientKeys)) if (Display(k) == display) return k;
+            return display;
+        }
+    }
+
     public class ServerSpec
     {
+        public string Image = OsCatalog.DefaultServer;
         public string Name;
         public int HostOctet;
         public int Cpu;
@@ -48,6 +76,9 @@ namespace LabBuilderSetup
         public string InstallDir;
         public string LabName;
         public string LabRoot;
+        public string LibraryRoot;     // shared image library (ADR 0013)
+        public string WsImage;         // Win11LTSC | Win10
+        public string Win10IsoPath;    // tester-supplied Windows 10 ISO (Iso.Images.Win10.SourcePath)
         public string Fqdn;
         public string NetBios;
         public bool GeneratePassword;
@@ -88,6 +119,8 @@ namespace LabBuilderSetup
             InstallDir = @"C:\LabBuilder";
             LabName = "TESTLAB";
             LabRoot = Directory.Exists(@"D:\") ? @"D:\HyperVLab" : @"C:\HyperVLab";
+            LibraryRoot = DefaultLibraryFor(LabRoot);
+            WsImage = OsCatalog.DefaultClient; Win10IsoPath = "";
             Fqdn = ""; NetBios = "";
             GeneratePassword = true; AdminPassword = "";
             SwitchType = "Private"; SwitchName = "LAB-Isolated"; Prefix = "10.10.10";
@@ -105,6 +138,24 @@ namespace LabBuilderSetup
             SqlInstance = "SQLEXPRESS"; SqlPort = 1433; SqlMixed = false; SqlSysadminGroups = new List<string>();
             SqlDatabase = "LabDB"; SqlDbOwnerGroups = new List<string> { "SG-Lab-Testers" }; SqlCollation = "";
             IsoSource = ""; ConfigOnly = false;
+        }
+
+        /// <summary>Same default as Get-LabLibraryRoot: &lt;LabRoot drive&gt;:\LabBuilder-Library.</summary>
+        public static string DefaultLibraryFor(string labRoot)
+        {
+            var drive = string.IsNullOrEmpty(labRoot) ? "C" : labRoot.Substring(0, 1).ToUpperInvariant();
+            return drive + @":\LabBuilder-Library";
+        }
+
+        /// <summary>OS catalog keys used by the lab (servers + workstations).</summary>
+        public IEnumerable<string> ImagesInUse
+        {
+            get
+            {
+                var keys = AllServers.Select(s => s.Image).ToList();
+                if (WsCount > 0) keys.Add(WsImage);
+                return keys.Distinct();
+            }
         }
 
         public IEnumerable<ServerSpec> AllServers { get { return DomainControllers.Concat(MemberServers); } }
@@ -128,8 +179,8 @@ namespace LabBuilderSetup
         static string Server(ServerSpec s)
         {
             return string.Format(CultureInfo.InvariantCulture,
-                "        @{{ Name = {0}; HostOctet = {1}; ProcessorCount = {2}; MemoryBytes = {3}GB; DiskSizeBytes = {4}GB; Roles = {5}; AdditionalFeatures = {6} }}",
-                Q(s.Name), s.HostOctet, s.Cpu, s.MemoryGB, s.DiskGB, Arr(s.Roles), Arr(s.Features));
+                "        @{{ Name = {0}; Image = {7}; HostOctet = {1}; ProcessorCount = {2}; MemoryBytes = {3}GB; DiskSizeBytes = {4}GB; Roles = {5}; AdditionalFeatures = {6} }}",
+                Q(s.Name), s.HostOctet, s.Cpu, s.MemoryGB, s.DiskGB, Arr(s.Roles), Arr(s.Features), Q(s.Image));
         }
 
         /// <summary>Config v2 holding only the tester's choices; everything else comes from BaseConfig (ADR 0011).</summary>
@@ -142,7 +193,9 @@ namespace LabBuilderSetup
             sb.AppendLine("    BaseConfig    = 'lab.config.example.psd1'");
             sb.AppendLine("    SchemaVersion = 2");
             sb.AppendLine("    LabName       = " + Q(LabName));
-            sb.AppendLine("    Paths   = @{ LabRoot = " + Q(LabRoot) + " }");
+            sb.AppendLine("    Paths   = @{ LabRoot = " + Q(LabRoot) + "; LibraryRoot = " + Q(LibraryRoot) + " }");
+            if (!string.IsNullOrEmpty(Win10IsoPath))
+                sb.AppendLine("    Iso     = @{ Images = @{ Win10 = @{ SourcePath = " + Q(Win10IsoPath) + " } } }");
             sb.AppendLine("    Domain  = @{ Fqdn = " + Q(Fqdn.ToLowerInvariant()) + "; NetBiosName = " + Q(NetBios.ToUpperInvariant()) + " }");
             sb.AppendLine("    Network = @{ SwitchName = " + Q(SwitchName) + "; SwitchType = " + Q(SwitchType) + "; Prefix = " + Q(Prefix) + " }");
             sb.AppendLine("    DomainControllers = @(");
@@ -156,8 +209,8 @@ namespace LabBuilderSetup
                 sb.AppendLine("    )");
             }
             sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
-                "    Workstations = @{{ Count = {0}; NamePrefix = {1}; FirstHostOctet = {2}; ProcessorCount = {3}; MemoryBytes = {4}GB; DiskSizeBytes = {5}GB }}",
-                WsCount, Q(WsPrefix), WsFirstOctet, WsCpu, WsMemoryGB, WsDiskGB));
+                "    Workstations = @{{ Image = {6}; Count = {0}; NamePrefix = {1}; FirstHostOctet = {2}; ProcessorCount = {3}; MemoryBytes = {4}GB; DiskSizeBytes = {5}GB }}",
+                WsCount, Q(WsPrefix), WsFirstOctet, WsCpu, WsMemoryGB, WsDiskGB, Q(WsImage)));
             sb.AppendLine(string.Format(CultureInfo.InvariantCulture,
                 "    Accounts = @{{ DomainAdminCount = {0}; TestUserCount = {1}; PasswordLength = {2}; TestUsersAreLocalAdmins = {3} }}",
                 DomainAdminCount, TestUserCount, PasswordLength, B(TestUsersLocalAdmin)));
@@ -210,7 +263,7 @@ namespace LabBuilderSetup
         }
         static int Gb(long bytes) { return (int)(bytes / (1024L * 1024L * 1024L)); }
 
-        static List<ServerSpec> Servers(object v)
+        static List<ServerSpec> Servers(object v, string defaultServer)
         {
             var result = new List<ServerSpec>();
             foreach (var o in List(v))
@@ -219,6 +272,7 @@ namespace LabBuilderSetup
                 if (d == null) continue;
                 var s = new ServerSpec(S(d, "Name", ""), (int)L(d, "HostOctet", 0), (int)L(d, "ProcessorCount", 2),
                     Gb(L(d, "MemoryBytes", 4L << 30)), Gb(L(d, "DiskSizeBytes", 80L << 30)));
+                s.Image = S(d, "Image", defaultServer);
                 s.Roles = List(Get(d, "Roles")).Select(x => Convert.ToString(x)).Where(x => !string.IsNullOrEmpty(x)).ToList();
                 s.Features = List(Get(d, "AdditionalFeatures")).Select(x => Convert.ToString(x)).Where(x => !string.IsNullOrEmpty(x)).ToList();
                 result.Add(s);
@@ -232,13 +286,18 @@ namespace LabBuilderSetup
             s.InstallDir = keep.InstallDir; s.IsoSource = keep.IsoSource;
             s.LabName = S(d, "LabName", s.LabName);
             s.LabRoot = S(d, "Paths.LabRoot", s.LabRoot);
+            s.LibraryRoot = S(d, "Paths.LibraryRoot", "");
+            if (string.IsNullOrEmpty(s.LibraryRoot)) s.LibraryRoot = DefaultLibraryFor(s.LabRoot);
+            s.WsImage = S(d, "Workstations.Image", OsCatalog.DefaultClient);
+            s.Win10IsoPath = S(d, "Iso.Images.Win10.SourcePath", "");
             s.Fqdn = S(d, "Domain.Fqdn", "");
             s.NetBios = S(d, "Domain.NetBiosName", "");
             s.SwitchType = S(d, "Network.SwitchType", s.SwitchType);
             s.SwitchName = S(d, "Network.SwitchName", s.SwitchName);
             s.Prefix = S(d, "Network.Prefix", s.Prefix);
-            s.DomainControllers = Servers(Get(d, "DomainControllers"));
-            s.MemberServers = Servers(Get(d, "MemberServers"));
+            var defServer = S(d, "Iso.DefaultServerImage", OsCatalog.DefaultServer);
+            s.DomainControllers = Servers(Get(d, "DomainControllers"), defServer);
+            s.MemberServers = Servers(Get(d, "MemberServers"), defServer);
             s.WsCount = (int)L(d, "Workstations.Count", s.WsCount);
             s.WsPrefix = S(d, "Workstations.NamePrefix", s.WsPrefix);
             s.WsFirstOctet = (int)L(d, "Workstations.FirstHostOctet", s.WsFirstOctet);

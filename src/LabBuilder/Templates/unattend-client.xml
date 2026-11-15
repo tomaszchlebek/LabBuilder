@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- LabBuilder: Windows 11 first-boot answer file (ADR 0004). Creates the local LabAdmin account, skips online-account OOBE. -->
+<!-- LabBuilder: Windows 10/11 workstation first-boot answer file (ADR 0004, 0013). Creates the local LabAdmin account, skips online-account OOBE. -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
   <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">

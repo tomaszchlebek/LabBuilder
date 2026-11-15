@@ -7,7 +7,9 @@
 - A local administrator account on the host and a console session there (local or RDP).
 - RAM and disk for the VMs you choose — the default lab (1 DC, 1 IIS server, 1 workstation, 4 GB each) needs **~12 GB free RAM**
   and **~150 GB free disk** (dynamic disks start at ~15 GB each and grow up to the chosen size).
-- Internet access from the host for the ISO download (~13 GB; plus ~300 MB SQL Server Express media if a server gets role SQL) — or pre-downloaded media (§4).
+- Internet access from the host for the ISO download (5–8 GB per operating system you use and the library does not have yet;
+  plus ~300 MB SQL Server Express media if a server gets role SQL) — or pre-downloaded media (§4).
+- For Windows 10 workstations: your own **Windows 10 Enterprise ISO** on the host (Microsoft offers no evaluation any more).
 - Your decisions: domain FQDN (e.g. `lab.test`, not `.local`) and NetBIOS name (≤ 15 characters), plus the topology below.
 
 ## 2. Install and build with the wizard (recommended)
@@ -19,15 +21,15 @@
 | Page | You decide |
 |------|-----------|
 | Welcome | prerequisite check (must be all OK/WARN) |
-| Install & lab | install folder (default `C:\LabBuilder`), lab name, lab folder for ISOs/VMs |
+| Install & lab | install folder (default `C:\LabBuilder`), lab name, lab folder (VM disks, logs, `lab.json`), **image library folder** shared by all labs (default `<lab drive>:\LabBuilder-Library`: ISOs + one base image per OS) |
 | Domain | forest FQDN, NetBIOS name, generated or entered lab administrator password |
 | Network | **isolated (Private)** or **host-reachable (Internal)** switch, switch name, /24 subnet |
-| Domain controllers | **how many (1–5)**, per DC: name, IP, **vCPU, RAM, disk (dynamic)**, extra roles (ADCS, IIS, DHCP, File Server, features) |
-| Member servers | **how many (0–10)**, per server: name, IP, size, **roles** (ADCS, IIS, DHCP, File Server, **SQL**); IIS HTTPS, DHCP range, share name |
+| Domain controllers | **how many (1–5)**, per DC: name, **operating system (Windows Server 2025 / 2022 / 2019)**, IP, **vCPU, RAM, disk (dynamic)**, extra roles (ADCS, IIS, DHCP, File Server, features) |
+| Member servers | **how many (0–10)**, per server: name, **operating system**, IP, size, **roles** (ADCS, IIS, DHCP, File Server, **SQL**); IIS HTTPS, DHCP range, share name |
 | Accounts | **number of dedicated domain admins**, **number of test users**, password length, **test users local admins yes/no**, security groups |
 | SQL Server | **shown only when a member server has role SQL** (SQL Server 2025 Express): **instance name** (`SQLEXPRESS` named / `MSSQLSERVER` default), **static TCP port**, **Windows or Mixed authentication** (sa password generated), **sysadmin groups** (Domain Admins always), **test database** (or none) and its **db_owner groups**, **collation** |
-| Workstations | **how many (0–20)**, name prefix, first IP, **generic vCPU / RAM / disk (dynamic)** |
-| ISOs | download from Microsoft, or a pre-downloaded folder |
+| Workstations | **how many (0–20)**, **operating system** (Windows 11 Enterprise LTSC, or Windows 10 Enterprise + **your ISO file**), name prefix, first IP, **generic vCPU / RAM / disk (dynamic)** |
+| ISOs | lists the ISOs this lab needs; missing ones are downloaded from Microsoft, or imported from a pre-downloaded folder |
 | Summary | everything, resource totals vs host, VM regional settings (from this host); validated with the build rules |
 
 3. Click **Install & build**. The wizard installs LabBuilder into the install folder, saves
@@ -67,24 +69,44 @@ Check a config without building: `.\scripts\Test-LabConfigFile.ps1 -ConfigPath .
 On any Windows machine with internet access (no Hyper-V or admin rights needed):
 
 ```powershell
-.\scripts\Get-LabIso.ps1 -Destination E:\LabIso
+.\scripts\Get-LabIso.ps1 -Destination E:\LabIso                                          # the OSes the config uses
+.\scripts\Get-LabIso.ps1 -Destination E:\LabIso -Image Server2025, Server2022, Server2019, Win11LTSC
 ```
+
+Windows 10 (`Win10`) is never downloaded — choose your ISO in the wizard (or set `Iso.Images.Win10.SourcePath`).
 
 With SQL servers in the lab, add `-IncludeSql`: the Microsoft web installer (signature-checked) downloads the SQL Server Express
 offline package into `E:\LabIso\SQL` (nothing is installed on that machine).
 
 Copy the folder (ISOs **and** `iso-manifest.json`, plus the `SQL` subfolder) to the host and choose it on the wizard's ISO page (or `-IsoSource`).
-Every ISO is re-checked by SHA-256. Once in `<LabRoot>\ISO`, ISOs are reused by later builds.
+Every ISO is re-checked by SHA-256. Once in the image library (`<library>\ISO`), ISOs are reused by every later build and lab.
+
+### Image library (ADR 0013)
+
+```
+<library>\ISO\            ISOs + iso-manifest.json (SHA-256, source), SQL\ (SQL Server Express package)
+<library>\BaseImages\     <OS>.vhdx (read-only) + <OS>.vhdx.json (version, language, ISO SHA-256) - one per OS
+<lab folder>\             VMs\, Logs\, Reports\, state.json, lab.json (this lab only)
+```
+
+- A base image is built once per OS and rebuilt automatically only when its ISO changes (new Microsoft build or another
+  Windows 10 ISO). VMs are independent copies, so a rebuild never breaks an existing lab.
+- Two builds running at the same time never download or build the same item twice (host-wide lock per item).
+- Labs built with 1.0/1.1 keep working: their `<LabRoot>\ISO` and `<LabRoot>\BaseImages` are moved into the library on the
+  next run of phase Iso / BaseImages.
 
 ### ISO links
 
 `config\lab.config.example.psd1` → `Iso.Images.*.Url` (Microsoft Evaluation Center, English):
 
 - Windows Server 2025 — <https://www.microsoft.com/en-us/evalcenter/download-windows-server-2025> → ISO, 64-bit, English (United States)
+- Windows Server 2022 — <https://www.microsoft.com/en-us/evalcenter/download-windows-server-2022> → ISO, 64-bit, English (United States)
+- Windows Server 2019 — <https://www.microsoft.com/en-us/evalcenter/download-windows-server-2019> → ISO, 64-bit, English (United States)
 - Windows 11 Enterprise **LTSC** — <https://www.microsoft.com/en-us/evalcenter/download-windows-11-enterprise> → "ISO – Enterprise LTSC download", English (United States)
 - SQL Server 2025 **Express** — <https://www.microsoft.com/en-us/sql-server/sql-server-downloads> → Express "Download now" (`Roles.SQL.BootstrapperUrl`).
   If the automatic media download fails, run that web installer by hand → *Download Media* → *Express Core*, and put
-  `SQLEXPR_x64_ENU.exe` into `<LabRoot>\ISO\SQL` (or `<pre-download folder>\SQL`); it must be signed by Microsoft.
+  `SQLEXPR_x64_ENU.exe` into `<library>\ISO\SQL` (or `<pre-download folder>\SQL`); it must be signed by Microsoft.
+- Windows 10 Enterprise — no evaluation download exists any more; use your own ISO (e.g. Windows 10 Enterprise LTSC 2021).
 
 If a download fails with *HTTP 404* or *not in Iso.AllowedDownloadHosts*, Microsoft published a new build: copy the new
 link into `config\lab.config.example.psd1` in the install folder and re-run. Set `ExpectedSha256` to pin an exact file.
@@ -124,24 +146,30 @@ Lab administrator password: `(Import-Clixml .\output\TESTLAB\lab-admin.cred.xml)
 |---------|--------|
 | A phase fails | Read the error in the wizard log / `output\<Lab>\build-*.log`; fix; run again (wizard: load the config; script: the printed `-Phase` command). |
 | "Timed out waiting for <VM>" | Open the VM console — OOBE stuck or error screen. Check host RAM. |
+| "request to list features ... failed" / `0x80071A2D` | Windows inside the new VM was still finishing first-boot servicing. The build restarts the VM and retries automatically (log: "Windows servicing is busy ... restarting"); if it still fails after 3 retries, re-run — finished work is skipped. |
 | Additional DC promotion fails | Check DC01 is healthy (console); re-run `-Phase DomainControllers`. |
 | HTTPS certificate request fails | The build grants the IIS server's computer account Enroll on the template and restarts the CA. If it still fails (e.g. `0x80094012` with a custom `CertificateTemplate`), check the template's Security tab and that it is published on the CA, then re-run `-Phase MemberServers,Workstations,Validate`. |
-| Base image wrong edition | Adjust `ImageNamePattern`, `Remove-Lab.ps1 -IncludeBaseImages`, rebuild. |
+| Summary page: "Lab name ... is already used on this host by a lab of domain ..." / "Lab folder ... already belongs to lab ..." / "Switch ... already connects VMs of another lab" | Another lab exists on the host. For a **second lab** next to it: on *Install & lab* choose a new **lab name** and **lab folder**, on *Network* a new **switch name** and **subnet** (e.g. `10.10.20`) — the image library is shared, so nothing is downloaded again. To **replace** the old lab: `Remove-Lab.ps1 -ConfigPath <old config> -RemoveOutput` first. |
+| Base image wrong edition | Adjust `ImageNamePattern`, delete `<library>\BaseImages\<OS>.vhdx` (+ `.json`), rebuild. |
+| "No image matching 'Windows 10 Enterprise*'" | Your Windows 10 ISO has no Enterprise edition (e.g. a consumer Home/Pro ISO) — use an Enterprise or Enterprise LTSC ISO. |
+| "another LabBuilder build is preparing library item ..." | A second build on the host is downloading/building the same ISO or base image; this one waits and then reuses it. |
+| Validation "OS is Windows Server 20xx" fails | The VM was built from another image (e.g. a 1.1 lab with the OS changed later) — remove that VM and build again. |
 | Changed VM sizes after a build | Existing VMs are not resized; remove the lab (or the VM) and build again. |
-| SQL media download fails (phase Iso) | Read the error; download the package by hand (§4 "ISO links") into `<LabRoot>\ISO\SQL` and re-run. A file not signed by Microsoft is refused. |
+| SQL media download fails (phase Iso) | Read the error; download the package by hand (§4 "ISO links") into `<library>\ISO\SQL` and re-run. A file not signed by Microsoft is refused. |
 | SQL Setup fails | The error shows the exit code and the result lines of `Summary.txt` (path inside the VM in the message). Check RAM (≥ 4 GB recommended) and disk, then re-run `-Phase MemberServers,Workstations,Validate`. |
 | Changed SQL instance, authentication or collation | Not applied to an installed SQL Server — remove that VM and build again (groups, database and port are re-applied on every run). |
-| Evaluation expired | Server 180 days, Windows 11 LTSC 90 days — remove and rebuild (SQL Server Express does not expire). |
+| Evaluation expired | Server 180 days, Windows 11 LTSC 90 days — remove and rebuild (SQL Server Express does not expire; Windows 10 follows your ISO's licence). |
 
 ## 8. Teardown
 
 ```powershell
 .\scripts\Remove-Lab.ps1 -ConfigPath .\config\lab.config.psd1 -WhatIf     # preview
-.\scripts\Remove-Lab.ps1 -ConfigPath .\config\lab.config.psd1             # VMs, disks, switch (keeps ISOs + base images)
-.\scripts\Remove-Lab.ps1 -ConfigPath .\config\lab.config.psd1 -IncludeBaseImages -IncludeIso -RemoveOutput
+.\scripts\Remove-Lab.ps1 -ConfigPath .\config\lab.config.psd1             # VMs, disks, switch, lab.json (keeps the image library)
+.\scripts\Remove-Lab.ps1 -ConfigPath .\config\lab.config.psd1 -IncludeLibrary -RemoveOutput
 ```
 
-Only VMs named `<LabName>-<ComputerName>` from the config are removed.
+Only VMs named `<LabName>-<ComputerName>` from the config are removed. `-IncludeLibrary` also deletes the ISOs and base
+images **this lab uses** from the shared library — other labs on the host that use the same OS will download/build them again.
 
 ## 9. Recording a lab run
 

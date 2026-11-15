@@ -8,7 +8,7 @@ function New-LabCredential {
 function Get-LabLocalCredential {
     # <Computer>\Administrator (server) or <Computer>\LabAdmin (Windows 11), lab admin password.
     param([Parameter(Mandatory)]$Definition, [Parameter(Mandatory)][pscredential]$AdminCredential)
-    $user = '{0}\{1}' -f $Definition.Name, (Get-LabLocalAdminName -Image $Definition.Image)
+    $user = '{0}\{1}' -f $Definition.Name, (Get-LabLocalAdminName -Image $Definition.Kind)
     return New-LabCredential -UserName $user -PasswordFrom $AdminCredential
 }
 
@@ -66,6 +66,45 @@ function Invoke-LabVMCommand {
             Start-Sleep -Seconds $RetryDelaySeconds
         }
     }
+}
+
+function Install-LabWindowsFeature {
+    <#
+    Installs Windows features in a VM (idempotent). A freshly deployed VM may still be finishing first-boot servicing (CBS);
+    Install-WindowsFeature then fails with e.g. 0x80071A2D "transaction that is no longer active" / "The request to list
+    features available on the specified server failed" (tester run 2026-11-15, Server 2025 DC). On such servicing errors the
+    VM is restarted and the install retried. Returns the RestartNeeded value of the last install.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$VMName,
+        [Parameter(Mandatory)][pscredential]$Credential,
+        [Parameter(Mandatory)][string[]]$Name,
+        [int]$Attempts = 4,
+        [int]$TimeoutMinutes = 30
+    )
+    for ($i = 1; ; $i++) {
+        try {
+            return Invoke-LabVMCommand -VMName $VMName -Credential $Credential -ArgumentList (, [string[]]$Name) -ScriptBlock {
+                param($Features)
+                $ErrorActionPreference = 'Stop'
+                $r = Install-WindowsFeature -Name $Features -IncludeManagementTools
+                if (-not $r.Success) { throw "Install-WindowsFeature $($Features -join ', ') failed: $($r.ExitCode)" }
+                [string]$r.RestartNeeded
+            }
+        } catch {
+            $msg = $_.Exception.Message
+            if (-not (Test-LabServicingError -Message $msg) -or $i -ge $Attempts) { throw }
+            Write-LabLog ("  {0}: Windows servicing is busy ({1}) - restarting the VM and retrying ({2}/{3}) ..." -f $VMName, (($msg -split "`n")[0]), $i, ($Attempts - 1)) -Level WARN
+            Restart-LabVM -VMName $VMName -Credential $Credential -TimeoutMinutes $TimeoutMinutes
+        }
+    }
+}
+
+function Test-LabServicingError {
+    # Transient Windows servicing (CBS / feature store) errors that a VM restart clears.
+    param([string]$Message)
+    return ($Message -match '0x80071a2d|0x800f0922|0x80070bc9|list features available|no longer active|another installation is in progress|pending restart|reboot is pending')
 }
 
 function Restart-LabVM {

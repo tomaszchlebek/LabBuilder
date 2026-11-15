@@ -5,6 +5,43 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-11-15
+
+### Added
+- **Operating system per VM** (FR-22, ADR 0013): each domain controller and member server runs **Windows Server 2025, 2022 or
+  2019** (Evaluation Center ISOs, Standard Desktop Experience); workstations run **Windows 11 Enterprise LTSC** or **Windows 10
+  Enterprise from an ISO the tester supplies** (Microsoft no longer offers a Windows 10 evaluation). Wizard: OS column in both
+  server grids, OS choice + ISO browse on the Workstations page; the ISO page lists exactly the ISOs the lab needs.
+- **Shared image library** (FR-21): `Paths.LibraryRoot` (default `<LabRoot drive>:\LabBuilder-Library`, wizard field) holds the
+  ISOs and **one base image per OS** for all labs on the host; a base image is rebuilt only when its ISO changes; a host-wide
+  lock per item stops two builds from downloading/building the same thing. Media of 1.0/1.1 labs (`<LabRoot>\ISO`,
+  `<LabRoot>\BaseImages`) is moved into the library automatically — nothing is downloaded again.
+- **Lab manifest** (FR-23): `<LabRoot>\lab.json` (name, version, folders, switch, domain, VMs with OS; no secrets), updated after
+  every phase; every VM's notes start with `LabBuilder:<LabName>` (also added to VMs of existing labs) — groundwork for lab
+  discovery (1.4.0).
+- Validation checks the **OS of every VM**; the lab summary lists the OS per VM and the library folder.
+- `Get-LabIso.ps1 -Image Server2025, Server2022, Server2019, Win11LTSC` (default: the OSes the config uses).
+- **Host conflict check** (`Test-LabHostConflict`): the wizard's Summary page and `Invoke-LabBuild.ps1` stop **before any work**
+  when another lab on the host already uses the same lab name with another domain, the same lab folder, or the same switch,
+  with a message saying what to change (found in the tester's 1.2.0 run: same lab name, new domain).
+
+### Fixed
+- Windows feature installs (AD DS, AD CS, DHCP, File Server, IIS, extra features) survive a freshly deployed VM that is still
+  servicing: on errors such as `0x80071A2D` ("transaction that is no longer active" / "request to list features ... failed")
+  the VM is restarted and the install retried (up to 3 times) — seen on the forest root DC in the tester's 1.2.0 run.
+- New forest: "Active Directory ready" now also requires DC discovery (`Get-ADDomainController -Discover -Service ADWS`, default
+  `Get-ADDomain`) twice in a row, not only the local ADWS — the account step failed with "Unable to find a default server with
+  Active Directory Web Services running" (tester run 3); that step also retries longer (5 × 30 s). AD module warnings about the
+  default `AD:` drive are no longer printed (the drive stays on where it is used - the certificate template ACL step).
+
+### Changed
+- Config: `Iso.Images` is now the OS catalog (`Server2025`, `Server2022`, `Server2019`, `Win11LTSC`, `Win10`, each with `Kind`
+  and `CaptionPattern`), `Iso.DefaultServerImage`, optional `Image` per server, `Workstations.Image`, `Paths.LibraryRoot`.
+  Wizard configs (BaseConfig) keep working; a stand-alone config with the old `Server`/`Client` keys gets a clear error.
+- `Remove-Lab.ps1`: `-IncludeLibrary` (aliases `-IncludeBaseImages`, `-IncludeIso`) deletes only the library items this lab
+  uses; `lab.json` is removed with the lab.
+- `scripts/Publish-LabRelease.ps1` writes the release notes without a UTF-8 BOM.
+
 ## [1.1.1] — 2026-11-15
 
 ### Added

@@ -395,5 +395,121 @@ on IIS01 Accounts → SQL Server → Workstations, step listed. Pester 52/52 (du
 **What:** Requester approved publishing 1.1.1 (branding, maximised/resizable wizard, high-DPI side panel fix, default 1 workstation,
 SQL page only when needed, release script, roadmap). Published with `scripts/Publish-LabRelease.ps1` (first real use): tests,
 exe build, commit, push, tag `v1.1.1`, GitHub release with `LabBuilderSetup.exe`.
-**Verification:** `gh release view v1.1.1`.
+**Verification:** `gh release view v1.1.1`: latest release, asset LabBuilderSetup.exe (238 KB, SHA-256 7CC3B8A7...4878), commit 76720ca. The notes started with a UTF-8 BOM (PS 5.1 `Set-Content -Encoding UTF8`) - stripped on GitHub with `gh release edit`; the script now writes the notes without BOM (fix goes out with the next release).
 **Next:** 1.2.0 - shared image library and OS choice (docs/ROADMAP.md).
+
+## 2026-11-15 — Release 1.2.0: OS choice per VM, shared image library, lab manifest
+
+**Request:** Roadmap 1.2.0 (old 1.1.3 + 1.1.5): choose the OS of servers (Server 2019/2022/2025) and workstations (Windows 10/11);
+create base images once and use them for any future lab. Plus the lab manifest/VM tags planned as groundwork for 1.4.0.
+**Research:** Evaluation Center (2026-11-15): Server 2022 `go.microsoft.com/fwlink/p/?LinkID=2195280` → `SERVER_EVAL_x64FRE_en-us.iso`
+(5,044,094,976 bytes), Server 2019 `LinkID=2195167` → `17763.3650...SERVER_EVAL_x64FRE_en-us.iso` (5,652,088,832 bytes), both on the
+allow-listed `software-static.download.prss.microsoft.com`; Server 2025 8,152,356,864 bytes, Windows 11 LTSC 5,112,850,432 bytes.
+Windows 10 Enterprise evaluation is gone (decision D1: tester-supplied ISO).
+**Decision:** [ADR 0013](adr/0013-shared-image-library-and-os-choice.md); REQUIREMENTS v0.5 (IN-15, FR-21..FR-23; FR-1/2/11/15 amended).
+**What:**
+- Config: OS catalog `Iso.Images` (`Server2025/2022/2019`, `Win11LTSC`, `Win10` with `Supplied`, `SourcePath`), `Kind`, `CaptionPattern`,
+  `Iso.DefaultServerImage`, `Image` per server, `Workstations.Image`, `Paths.LibraryRoot`; validation of keys, kinds per role, Win10 ISO path,
+  library outside the lab folder, legacy `Server`/`Client` catalog → clear error. VM definitions carry `Image` + `Kind`.
+- `Public/Library.ps1`: library root, `Invoke-LabLibraryLock` (named mutex `Global\LabBuilder-Library-<item>`, abandoned = acquired),
+  manifest entry update under its own lock, `Move-LabLegacyMedia` (1.0/1.1 ISOs + SQL media into the library), `Import-LabSuppliedIso`
+  (copy + hash + source record, re-import when the source changes), `Write-LabManifest` (`lab.json` after every phase), `Get-LabVmNote`.
+- ISO phase/`Save-LabIso`/`Import-LabIso`/`Confirm-LabHostIso` and SQL media use `<Library>\ISO`; per-image locks. Base images
+  `<Library>\BaseImages\<Key>.vhdx`: adopt a 1.0/1.1 base of the lab, rebuild when the ISO hash changed, build under lock.
+- VMs: unattend/local admin/vTPM by `Kind`; notes `LabBuilder:<Lab> | <role> <name> <ip> | <OS>` (existing VMs get tagged).
+- Validation: OS check for every VM (catalog `CaptionPattern`); workstation LTSC check replaced. Summary lists OS per VM + library.
+- `Remove-Lab.ps1 -IncludeLibrary` (aliases kept) deletes only this lab's library items, `$PSCmdlet` captured so `-WhatIf` holds inside lock
+  blocks; `Get-LabIso.ps1 -Image <keys>` (default: the OSes the config uses).
+- Wizard: library folder (follows the lab drive until changed), OS combo column in both server grids, workstation OS + Windows 10 ISO
+  browse (file must exist), ISO page lists the needed ISOs, summary with OS; `LabModel.cs` reads/writes all new keys.
+- Version 1.2.0; README, RUNBOOK (library section, links, troubleshooting, teardown), ARCHITECTURE, ROADMAP, CHANGELOG.
+**Not done (moved):** the generic media downloader planned in the roadmap for 1.2.0 moves to 1.5.0 (no new media type needed it yet).
+**Files:** `config/lab.config.example.psd1`, `src/LabBuilder/Public/{Library,Config,Iso,HostSetup,VM,Phase,Validation,SqlServer,Roles}.ps1`,
+`src/LabBuilder/Private/VMHelpers.ps1`, `src/LabBuilder/Templates/unattend-client.xml`, `src/LabBuilder/LabBuilder.psd1`,
+`scripts/{Invoke-LabBuild,Get-LabIso,Remove-Lab}.ps1`, `installer/src/{LabModel,WizardForm}.cs`, `tests/{LabBuilder,Library}.Tests.ps1`, docs.
+**Verification:**
+- Pester 65/65 (13 new in `tests/Library.Tests.ps1`: catalog, OS per VM + kind rules, Win10 ISO rule, legacy catalog error, library
+  default/inside-lab rule, base path, required images, nested locks, VM note, `lab.json` (no secrets, CreatedUtc kept), supplied ISO
+  import/re-import, 1.0/1.1 ISO migration); 5 old tests moved to the new keys; check-block count 9.
+- Lock across two processes: B waited for A and continued; A killed while holding → B acquired (abandoned mutex).
+- Wizard model checks: 0 failures (new: OS per server, Win10 + ISO path, library folder, round trip); pages rendered (Install, DCs,
+  Members with OS column, Workstations with Windows 10, ISOs) and inspected — duplicated "your ISO" text fixed.
+- Parse + ASCII checks clean (found and fixed a literal U+25B6 character in WizardForm.cs that came in with 1.1.1; now the `▶` escape); exe built 1.2.0.
+- **Not verified:** a real build with Server 2019/2022 and Windows 10 VMs, the 1.1 → 1.2 media migration on a real lab folder, and base
+  images built from the 2019/2022 ISOs (tester host run).
+**Next:** Tester host run (ideally: existing 1.1 lab folder to see the migration, one Server 2022 + one Server 2019 server, Win10 if an
+ISO is at hand); then publish 1.2.0. Note for 1.3.0: the roadmap's optional differencing disks conflict with ADR 0008 (plain dynamic disks
+required) — to be decided with the requester before 1.3.0.
+
+## 2026-11-15 — 1.2.0 tester run 1: lab-name conflict caught too late → host conflict check
+
+**Lab run:** host ITOMHV01, LabBuilder 1.2.0 wizard, lab name `TESTLAB` (the existing 1.1 lab's name) with a new domain `one.lab`.
+Stopped before Preflight: `output\TESTLAB\lab-accounts.csv belongs to another domain (UPN suffix)` (exit 1). Nothing was changed on the host.
+**Cause:** the guard is right (same VM names `TESTLAB-*`, same credentials folder), but it only ran inside the build and its message did not
+say what to do. Two more collisions of a second lab were not detected at all: the same lab folder (`state.json`/`lab.json` are per folder)
+and the same switch (`LAB-Isolated`, same 10.10.10.x addresses).
+**Fix:** `Test-LabHostConflict` (Library.ps1): same lab name with another domain (output\<Lab>\lab-accounts.csv UPN suffix), lab folder of
+another lab (lab.json name/domain, else 1.1 state.json name), switch already connecting VMs not named `<Lab>-*`. Runs in
+`Test-LabConfigFile.ps1 -OutputRoot` (wizard Summary page - the build cannot start) and in `Invoke-LabBuild.ps1` before anything is
+written; message: choose another lab name, folder and switch/subnet (the library is shared) or remove the old lab. The build's own
+account-plan guard got the same wording. Wizard validation box height now measured from the wrapped text (long messages, high DPI).
+**Files:** `src/LabBuilder/Public/Library.ps1`, `src/LabBuilder/LabBuilder.psd1`, `scripts/{Test-LabConfigFile,Invoke-LabBuild}.ps1`,
+`installer/src/WizardForm.cs`, `tests/Library.Tests.ps1`, `CHANGELOG.md`, `docs/RUNBOOK.md`
+**Verification:** Pester 68/68 (3 new: no conflict, tester case + same-domain re-run OK, lab folder of another lab via state.json/lab.json);
+`Test-LabConfigFile.ps1 -OutputRoot` on a simulation of the tester case prints the new ERROR line and exits 1. Switch check not testable
+here (needs elevated Hyper-V) - covered by the tester's next run.
+**Next:** tester re-run, either the existing lab unchanged (domain kept; add a Server 2022/2019 server - tests the migration) or a second
+lab with a new name, folder and switch/subnet.
+
+## 2026-11-15 — 1.2.0 tester run 2: feature install failed on a fresh DC (0x80071A2D) → servicing retry
+
+**Lab run:** ITOMHV01, wizard 1.2.0, lab TESTLAB / domain one.lab (the old lab had been removed). Preflight 0.1 min, Iso 8.9 min,
+**BaseImages 13.5 min - all four base images built in the new library** (`D:\LabBuilder-Library\BaseImages`): Server2025, Server2022
+(10.0.20348.587), Server2019 (10.0.17763.3650), Win11LTSC (10.0.26100.1742), ~3 min each; Network created `LAB-Isolated`; DC01 created
+from `Server2025.vhdx`, booted and got its IP. **Failed:** `Install-WindowsFeature AD-Domain-Services` inside DC01 (6 min after first
+boot): "The request to list features available on the specified server failed ... transaction that is no longer active. Error: 0x80071a2d".
+**Cause:** Windows component servicing (CBS) in the freshly specialised VM was still busy; the error is transient (clears after a restart).
+Not related to the 1.2.0 library changes (same base-image method as 1.1), just never hit before.
+**Fix:** `Install-LabWindowsFeature` (VMHelpers.ps1): installs features in a VM; on servicing errors (`Test-LabServicingError`:
+0x80071A2D, 0x800F0922, 0x80070BC9, "list features available", "no longer active", pending restart) it restarts the VM and retries
+(4 attempts). All feature installs now use it: AD DS on the forest root and additional DCs, AD CS, DHCP, File Server, IIS, extra features
+(the in-VM blocks no longer install features themselves).
+**Files:** `src/LabBuilder/Private/VMHelpers.ps1`, `src/LabBuilder/Public/Roles.ps1`, `tests/Library.Tests.ps1`, `CHANGELOG.md`, `docs/RUNBOOK.md`
+**Verification:** Pester 69/69 (new: the tester's exact message is classified transient; invalid feature name and 0x800F081F are fatal);
+parse clean. The retry itself needs a real VM - tester re-run (resume: the wizard with the same settings continues at DomainControllers).
+
+## 2026-11-15 — 1.2.0 tester run 3: AD "ready" too early on the new forest → stricter readiness
+
+**Lab run:** resumed at DomainControllers. The servicing fix was not needed this time (AD DS installed first try); forest `one.lab`
+created in ~10 min, DC01 restarted, "Active Directory answers" after 4 s - then the account step failed 3 times in 70 s:
+"Unable to find a default server with Active Directory Web Services running" (`Get-ADDomain` without `-Server`).
+**Cause:** `Wait-LabADReady` asked ADWS on DC01 directly (`-Server DC01`), which answers before the DC locator can *discover* a DC with
+ADWS (what every later AD cmdlet without `-Server` uses) on a brand-new forest.
+**Fix:** readiness = local `Get-ADDomain -Server` + `Get-ADDomainController -Discover -Service ADWS -ForceDiscover` + default
+`Get-ADDomain`, all matching the FQDN, **twice in a row** (20 s apart); account step retries 5 × 30 s. `ADPS_LoadDefaultDrive = 0`
+and `-WarningAction SilentlyContinue` where the AD module is loaded (no "Error initializing default drive" noise).
+**Files:** `src/LabBuilder/Public/{Roles,Validation}.ps1`, `CHANGELOG.md`
+**Verification:** Pester 69/69 (check blocks still compile); parse clean. Needs the tester's re-run (resume continues at DomainControllers;
+the forest exists, so it goes straight to the readiness wait).
+
+## 2026-11-15 — 1.2.0 tester run 4: regression "Cannot find drive AD" (my run-3 change) → fixed + guard test
+
+**Lab run:** resumed; the readiness fix worked (accounts, groups, users created; member servers started). WEB01 got IIS; then
+"granting Enroll on template 'WebServer'" failed 3x: `Cannot find drive. A drive with the name 'AD' does not exist` (`Get-Acl AD:\...`).
+**Cause:** run-3 change set `ADPS_LoadDefaultDrive = 0` wherever the AD module is loaded (to silence warnings) - including
+`Grant-LabCertificateTemplateEnroll`, which edits the template ACL through the `AD:` drive. My regression, not a host issue.
+**Fix:** that block loads the module with the drive (warnings suppressed only). New Pester guard: no script block in the module may use
+`AD:\` and disable the drive - verified it fails (naming Roles.ps1 line 36) when the bug is re-introduced, passes when fixed.
+**Files:** `src/LabBuilder/Public/Roles.ps1`, `tests/Library.Tests.ps1`, `CHANGELOG.md`
+**Verification:** Pester 70/70; guard proven against the regression; exe rebuilt. Resume continues at MemberServers.
+
+## 2026-11-15 — 1.2.0 tester run 5: lab complete ("all good") → publish 1.2.0
+
+**Lab run:** ITOMHV01, exe from `\itomhv01\downloads` (SHA-256 E1C4CFB7...), resumed at MemberServers: member servers (WEB01 with IIS +
+HTTPS certificate), workstations and validation finished; tester reported "all good". Over runs 2-5 the 1.2.0 features were exercised on
+the host: library `D:\LabBuilder-Library` with base images Server2025, Server2022 (10.0.20348.587), Server2019 (10.0.17763.3650) and
+Win11LTSC (10.0.26100.1742) built once and reused on resume ("Base image ... in library"), forest one.lab on Server 2025.
+**Not exercised on the host:** the 1.1 → 1.2 media migration (the old lab had been removed before run 2), Windows 10 workstations
+(no ISO), the host conflict switch check.
+**Next:** publish 1.2.0 (requester decision D4: publish after the host run passes); then 1.3.0 - ask the requester about the roadmap's
+optional differencing disks vs ADR 0008 first.

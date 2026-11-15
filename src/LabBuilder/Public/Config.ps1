@@ -102,7 +102,7 @@ function Get-LabVmDefinition {
         Flattens the topology (DomainControllers, MemberServers, Workstations) into one object per VM.
     .DESCRIPTION
         Properties: Role (DomainController | MemberServer | Workstation), Index, Name, VMName, IPAddress, HostOctet,
-        Image, ProcessorCount, MemoryBytes, DiskSizeBytes, Roles, AdditionalFeatures, OuName.
+        Image (OS catalog key, e.g. Server2022), Kind (Server | Client), ProcessorCount, MemoryBytes, DiskSizeBytes, Roles, AdditionalFeatures, OuName.
         Index 0 of DomainController is the forest root DC.
     #>
     [CmdletBinding()]
@@ -112,8 +112,15 @@ function Get-LabVmDefinition {
     )
 
     $list = New-Object System.Collections.Generic.List[object]
+    # OS per VM (ADR 0013): Image = catalog key in Iso.Images; Kind (Server/Client) comes from the catalog entry.
+    $defaultServer = [string]$Config.Iso.DefaultServerImage
+    if (-not $defaultServer) { $defaultServer = 'Server2025' }
     $make = {
         param($Name, $Octet, $RoleName, $Index, $Image, $Cpu, $Mem, $Disk, $Roles, $Extra, $Ou)
+        $kind = $null
+        $entry = $null
+        if ($Image -and $Config.Iso.Images) { $entry = $Config.Iso.Images.PSObject.Properties[[string]$Image] }
+        if ($entry) { $kind = [string]$entry.Value.Kind }
         [pscustomobject]@{
             Role               = $RoleName
             Index              = [int]$Index
@@ -121,7 +128,8 @@ function Get-LabVmDefinition {
             VMName             = '{0}-{1}' -f $Config.LabName, $Name
             IPAddress          = '{0}.{1}' -f $Config.Network.Prefix, $Octet
             HostOctet          = [int]$Octet
-            Image              = $Image
+            Image              = [string]$Image
+            Kind               = $kind
             ProcessorCount     = [int]$Cpu
             MemoryBytes        = [int64]$Mem
             DiskSizeBytes      = [int64]$Disk
@@ -134,20 +142,23 @@ function Get-LabVmDefinition {
     $i = 0
     foreach ($s in @($Config.DomainControllers)) {
         if ($null -eq $s) { continue }
-        $list.Add((& $make $s.Name $s.HostOctet 'DomainController' $i 'Server' $s.ProcessorCount $s.MemoryBytes $s.DiskSizeBytes $s.Roles $s.AdditionalFeatures $null))
+        $img = $defaultServer; if ($s.Image) { $img = [string]$s.Image }
+        $list.Add((& $make $s.Name $s.HostOctet 'DomainController' $i $img $s.ProcessorCount $s.MemoryBytes $s.DiskSizeBytes $s.Roles $s.AdditionalFeatures $null))
         $i++
     }
     $i = 0
     foreach ($s in @($Config.MemberServers)) {
         if ($null -eq $s) { continue }
-        $list.Add((& $make $s.Name $s.HostOctet 'MemberServer' $i 'Server' $s.ProcessorCount $s.MemoryBytes $s.DiskSizeBytes $s.Roles $s.AdditionalFeatures 'Servers'))
+        $img = $defaultServer; if ($s.Image) { $img = [string]$s.Image }
+        $list.Add((& $make $s.Name $s.HostOctet 'MemberServer' $i $img $s.ProcessorCount $s.MemoryBytes $s.DiskSizeBytes $s.Roles $s.AdditionalFeatures 'Servers'))
         $i++
     }
     $ws = $Config.Workstations
     if ($ws) {
+        $wsImage = 'Win11LTSC'; if ($ws.Image) { $wsImage = [string]$ws.Image }
         for ($n = 1; $n -le [int]$ws.Count; $n++) {
             $name = '{0}{1:D2}' -f $ws.NamePrefix, $n
-            $list.Add((& $make $name ([int]$ws.FirstHostOctet + $n - 1) 'Workstation' ($n - 1) 'Client' $ws.ProcessorCount $ws.MemoryBytes $ws.DiskSizeBytes @() @() 'Workstations'))
+            $list.Add((& $make $name ([int]$ws.FirstHostOctet + $n - 1) 'Workstation' ($n - 1) $wsImage $ws.ProcessorCount $ws.MemoryBytes $ws.DiskSizeBytes @() @() 'Workstations'))
         }
     }
 
@@ -222,13 +233,32 @@ function Test-LabConfig {
 
     # --- ISO ---
     if (@($Config.Iso.AllowedDownloadHosts).Count -lt 1) { $errors.Add('Iso.AllowedDownloadHosts must list at least one host.') }
-    foreach ($key in @('Server', 'Client')) {
-        $img = $Config.Iso.Images.$key
-        if ($null -eq $img) { $errors.Add("Iso.Images.$key is missing."); continue }
-        if ([string]$img.Url -notmatch '^https://') { $errors.Add("Iso.Images.$key.Url must be an https:// URL.") }
+    # OS catalog (ADR 0013)
+    $catalog = @()
+    if ($Config.Iso.Images) { $catalog = @($Config.Iso.Images.PSObject.Properties) }
+    $catalogKeys = @($catalog | ForEach-Object Name)
+    if (($catalogKeys -contains 'Server' -or $catalogKeys -contains 'Client') -and $catalogKeys -notcontains 'Server2025') {
+        $errors.Add('Iso.Images uses the LabBuilder 1.0/1.1 keys Server/Client. Copy the Iso section from config\lab.config.example.psd1 (OS catalog Server2025, Server2022, Server2019, Win11LTSC, Win10).')
+        return $errors.ToArray()
+    }
+    if ($catalog.Count -lt 1) { $errors.Add('Iso.Images (OS catalog) is empty.') }
+    foreach ($p in $catalog) {
+        $key = $p.Name; $img = $p.Value
+        if ($key -notmatch '^[A-Za-z][A-Za-z0-9]{1,30}$') { $errors.Add("Iso.Images key '$key' must be letters and digits."); continue }
+        if (@('Server', 'Client') -notcontains [string]$img.Kind) { $errors.Add("Iso.Images.$key.Kind must be Server or Client.") }
+        if ($img.Supplied) {
+            if ($img.SourcePath -and [string]$img.SourcePath -notmatch '^([A-Za-z]:\\|\\\\).+\.iso$') { $errors.Add("Iso.Images.$key.SourcePath must be the full path of an .iso file (or empty).") }
+        } elseif ([string]$img.Url -notmatch '^https://') { $errors.Add("Iso.Images.$key.Url must be an https:// URL.") }
         if ([string]$img.FileName -notmatch '^[A-Za-z0-9._-]+\.iso$') { $errors.Add("Iso.Images.$key.FileName must be a plain *.iso file name.") }
         if ($img.ExpectedSha256 -and [string]$img.ExpectedSha256 -notmatch '^[A-Fa-f0-9]{64}$') { $errors.Add("Iso.Images.$key.ExpectedSha256 must be 64 hex characters or empty.") }
         if (-not $img.ImageNamePattern) { $errors.Add("Iso.Images.$key.ImageNamePattern is required.") }
+        if (-not $img.CaptionPattern) { $errors.Add("Iso.Images.$key.CaptionPattern is required (used by the validation).") }
+    }
+    $fileNames = @($catalog | ForEach-Object { ([string]$_.Value.FileName).ToUpperInvariant() })
+    if (@($fileNames | Select-Object -Unique).Count -ne $fileNames.Count) { $errors.Add('Iso.Images: every image needs its own FileName.') }
+    $defServer = [string]$Config.Iso.DefaultServerImage
+    if ($defServer -and ($catalogKeys -notcontains $defServer -or [string]$Config.Iso.Images.$defServer.Kind -ne 'Server')) {
+        $errors.Add("Iso.DefaultServerImage '$defServer' must be a Server image of the catalog ($(@($catalog | Where-Object { $_.Value.Kind -eq 'Server' } | ForEach-Object Name) -join ', ')).")
     }
     if ($Scope -eq 'Iso') { return $errors.ToArray() }
 
@@ -236,6 +266,11 @@ function Test-LabConfig {
     if ([int]$Config.SchemaVersion -ne 2) { $errors.Add('Config SchemaVersion must be 2 (DomainControllers / MemberServers / Workstations layout). Start from config\lab.config.example.psd1.'); return $errors.ToArray() }
     if ([string]$Config.LabName -notmatch '^[A-Za-z0-9][A-Za-z0-9-]{0,14}$') { $errors.Add("LabName '$($Config.LabName)' must be 1-15 letters, digits or '-'.") }
     if ([string]$Config.Paths.LabRoot -notmatch '^[A-Za-z]:\\') { $errors.Add("Paths.LabRoot '$($Config.Paths.LabRoot)' must be an absolute path on a local drive of the host, e.g. D:\HyperVLab.") }
+    $lib = [string]$Config.Paths.LibraryRoot
+    if ($lib -and $lib -notmatch '^[A-Za-z]:\\') { $errors.Add("Paths.LibraryRoot '$lib' must be an absolute path on a local drive of the host (or empty for <LabRoot drive>:\LabBuilder-Library).") }
+    elseif ($lib -and [string]$Config.Paths.LabRoot -and ($lib.TrimEnd('\') + '\').StartsWith(([string]$Config.Paths.LabRoot).TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        $errors.Add('Paths.LibraryRoot must not be inside Paths.LabRoot (the library is shared by all labs).')
+    }
     if (@('Private', 'Internal') -notcontains $Config.Network.SwitchType) { $errors.Add("Network.SwitchType must be 'Private' or 'Internal'.") }
     if ([string]$Config.Network.SwitchName -notmatch '^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$') { $errors.Add('Network.SwitchName must be a simple name.') }
     if ([string]$Config.Network.Prefix -notmatch '^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){2}$') { $errors.Add("Network.Prefix '$($Config.Network.Prefix)' must be three octets, e.g. 10.10.10.") }
@@ -265,11 +300,17 @@ function Test-LabConfig {
         $octets[$d.HostOctet] = $d.Name
         if ($d.ProcessorCount -lt 1 -or $d.ProcessorCount -gt 64) { $errors.Add("$label vCPU must be 1-64.") }
         if ($d.MemoryBytes -lt 2GB -or $d.MemoryBytes -gt 512GB) { $errors.Add("$label RAM must be 2-512 GB.") }
+        $wantKind = 'Server'; if ($d.Role -eq 'Workstation') { $wantKind = 'Client' }
+        if ($catalogKeys -notcontains $d.Image) {
+            $errors.Add("$label uses OS '$($d.Image)', which is not in the OS catalog ($(@($catalog | Where-Object { $_.Value.Kind -eq $wantKind } | ForEach-Object Name) -join ', ')).")
+        } elseif ($d.Kind -ne $wantKind) {
+            $errors.Add("$label uses OS '$($d.Image)', a $($d.Kind) image; $($d.Role) needs a $wantKind image.")
+        }
         $minDisk = 40GB
         if ($d.Role -eq 'Workstation') {
             $minDisk = 64GB
-            if ($d.ProcessorCount -lt 2) { $errors.Add('Workstations need at least 2 vCPU (Windows 11).') }
-            if ($d.MemoryBytes -lt 4GB) { $errors.Add('Workstations need at least 4 GB RAM (Windows 11).') }
+            if ($d.ProcessorCount -lt 2) { $errors.Add('Workstations need at least 2 vCPU.') }
+            if ($d.MemoryBytes -lt 4GB) { $errors.Add('Workstations need at least 4 GB RAM.') }
         }
         if ($d.DiskSizeBytes -lt $minDisk -or $d.DiskSizeBytes -gt 2TB) { $errors.Add(("{0} disk must be {1}-2048 GB (is {2:N0} GB)." -f $label, ($minDisk / 1GB), ($d.DiskSizeBytes / 1GB))) }
         if ($d.DiskSizeBytes -lt $base) { $errors.Add("$label disk must not be smaller than BaseDiskSizeBytes.") }
@@ -324,6 +365,14 @@ function Test-LabConfig {
         if ([string]$Config.Roles.FileServer.Path -notmatch '^[A-Za-z]:\\') { $errors.Add('Roles.FileServer.Path must be an absolute local path.') }
     }
     foreach ($e in (Test-LabSqlConfig -Config $Config -Definitions $defs -GroupNames ([string[]]@($groups | ForEach-Object { [string]$_.Name })))) { $errors.Add($e) }
+
+    # --- Tester-supplied ISOs (Windows 10, ADR 0013) ---
+    foreach ($key in @($defs | ForEach-Object Image | Select-Object -Unique)) {
+        $img = $Config.Iso.Images.$key
+        if ($img -and $img.Supplied -and -not [string]$img.SourcePath) {
+            $errors.Add("$($img.Description): choose the ISO file (Iso.Images.$key.SourcePath) - Microsoft offers no evaluation download for it.")
+        }
+    }
 
     return $errors.ToArray()
 }

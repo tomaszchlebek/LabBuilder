@@ -7,8 +7,9 @@
     LabName = 'TESTLAB'                     # prefix of VM names on the host: <LabName>-<ComputerName>
 
     Paths = @{
-        LabRoot   = 'D:\HyperVLab'          # on this Hyper-V host: ISO, BaseImages, VMs, Logs, Reports
-        MinFreeGB = 150                     # free space required on the LabRoot drive
+        LabRoot     = 'D:\HyperVLab'        # this lab on the Hyper-V host: VMs, Logs, Reports, lab.json
+        LibraryRoot = ''                    # image library shared by ALL labs (ISO, BaseImages); '' = <LabRoot drive>:\LabBuilder-Library
+        MinFreeGB   = 150                   # free space required on the LabRoot drive
     }
 
     Domain = @{
@@ -37,28 +38,67 @@
         TimeZone     = ''
     }
 
+    # OS catalog (ADR 0013). Each VM uses one key: domain controllers / member servers 'Image' (default DefaultServerImage),
+    # all workstations Workstations.Image. ISOs and base images go into the shared image library (Paths.LibraryRoot).
     Iso = @{
         AllowedDownloadHosts = @(
             'software-static.download.prss.microsoft.com'
             'software-download.microsoft.com'
             'download.microsoft.com'
         )
+        DefaultServerImage = 'Server2025'
         Images = @{
-            Server = @{
+            Server2025 = @{
+                Kind             = 'Server'
                 Description      = 'Windows Server 2025 Evaluation (en-US)'
                 SourcePage       = 'https://www.microsoft.com/en-us/evalcenter/download-windows-server-2025'
                 Url              = 'https://go.microsoft.com/fwlink/?linkid=2345730&clcid=0x409&culture=en-us&country=us'
                 FileName         = 'WindowsServer2025-Eval-x64-en-us.iso'
                 ExpectedSha256   = ''       # optional; set to pin an exact build
                 ImageNamePattern = '*Standard*Desktop*'
+                CaptionPattern   = '*Windows Server 2025*'
             }
-            Client = @{
+            Server2022 = @{
+                Kind             = 'Server'
+                Description      = 'Windows Server 2022 Evaluation (en-US)'
+                SourcePage       = 'https://www.microsoft.com/en-us/evalcenter/download-windows-server-2022'
+                Url              = 'https://go.microsoft.com/fwlink/p/?LinkID=2195280&clcid=0x409&culture=en-us&country=US'
+                FileName         = 'WindowsServer2022-Eval-x64-en-us.iso'
+                ExpectedSha256   = ''
+                ImageNamePattern = '*Standard*Desktop*'
+                CaptionPattern   = '*Windows Server 2022*'
+            }
+            Server2019 = @{
+                Kind             = 'Server'
+                Description      = 'Windows Server 2019 Evaluation (en-US)'
+                SourcePage       = 'https://www.microsoft.com/en-us/evalcenter/download-windows-server-2019'
+                Url              = 'https://go.microsoft.com/fwlink/p/?LinkID=2195167&clcid=0x409&culture=en-us&country=US'
+                FileName         = 'WindowsServer2019-Eval-x64-en-us.iso'
+                ExpectedSha256   = ''
+                ImageNamePattern = '*Standard*Desktop*'
+                CaptionPattern   = '*Windows Server 2019*'
+            }
+            Win11LTSC = @{
+                Kind             = 'Client'
                 Description      = 'Windows 11 Enterprise LTSC Evaluation (en-US)'
                 SourcePage       = 'https://www.microsoft.com/en-us/evalcenter/download-windows-11-enterprise'
                 Url              = 'https://go.microsoft.com/fwlink/?linkid=2289029&clcid=0x409&culture=en-us&country=us'
                 FileName         = 'Windows11-EnterpriseLTSC-Eval-x64-en-us.iso'
                 ExpectedSha256   = ''
                 ImageNamePattern = 'Windows 11 Enterprise LTSC*'
+                CaptionPattern   = '*Windows 11*LTSC*'
+            }
+            # No Microsoft evaluation exists any more (Windows 10 end of support Oct 2025): the tester supplies the ISO
+            # (e.g. Windows 10 Enterprise LTSC 2021); SourcePath = that file on the host. Copied into the library.
+            Win10 = @{
+                Kind             = 'Client'
+                Description      = 'Windows 10 Enterprise (ISO supplied by the tester)'
+                Supplied         = $true
+                SourcePath       = ''
+                FileName         = 'Windows10-supplied.iso'
+                ExpectedSha256   = ''
+                ImageNamePattern = 'Windows 10 Enterprise*'
+                CaptionPattern   = '*Windows 10 Enterprise*'
             }
         }
     }
@@ -66,6 +106,7 @@
     BaseDiskSizeBytes = 32GB                # base image; each VM gets a dynamic copy expanded to DiskSizeBytes
 
     # 1..5 domain controllers. The first creates the forest; the others join it. Roles: ADCS, IIS, DHCP, FileServer.
+    # Optional per server: Image = 'Server2025' | 'Server2022' | 'Server2019' (default Iso.DefaultServerImage).
     DomainControllers = @(
         @{ Name = 'DC01'; HostOctet = 10; ProcessorCount = 2; MemoryBytes = 4GB; DiskSizeBytes = 80GB; Roles = @('ADCS'); AdditionalFeatures = @() }
     )
@@ -77,8 +118,9 @@
         @{ Name = 'IIS01'; HostOctet = 20; ProcessorCount = 2; MemoryBytes = 4GB; DiskSizeBytes = 80GB; Roles = @('IIS'); AdditionalFeatures = @() }
     )
 
-    # 0..20 Windows 11 workstations named <NamePrefix>01, 02, ... with IPs from FirstHostOctet.
+    # 0..20 workstations named <NamePrefix>01, 02, ... with IPs from FirstHostOctet. Image: Win11LTSC or Win10 (tester ISO).
     Workstations = @{
+        Image          = 'Win11LTSC'
         Count          = 1
         NamePrefix     = 'WS'
         FirstHostOctet = 101
@@ -119,7 +161,7 @@
             Path      = 'C:\Shares\LabShare'
         }
         # SQL Server Express, unattended (ADR 0012). Media: the official web installer is downloaded on the host
-        # (phase Iso) and fetches the offline package SQLEXPR_x64_ENU.exe into <LabRoot>\ISO\SQL; both must be
+        # (phase Iso) and fetches the offline package SQLEXPR_x64_ENU.exe into <Library>\ISO\SQL; both must be
         # Authenticode-signed by Microsoft. The lab VMs never need internet access.
         SQL = @{
             Description        = 'SQL Server 2025 Express (en-US)'

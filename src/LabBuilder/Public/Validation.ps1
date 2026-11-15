@@ -72,10 +72,23 @@ function Test-LabEnvironment {
         & $add 'Host' "$($d.VMName) adapters only on lab switch" ($nics.Count -ge 1 -and $foreign.Count -eq 0) (($nics | ForEach-Object { [string]$_.SwitchName }) -join ', ')
     }
 
+    # --- Operating system of every VM (FR-22, ADR 0013) ---
+    $osCheck = & $newCheck @'
+param($Pattern, $Label)
+$os = Get-CimInstance Win32_OperatingSystem
+& $c "OS is $Label" ($os.Caption -like $Pattern) "$($os.Caption) $($os.BuildNumber)"
+return $out.ToArray()
+'@
+    foreach ($d in $defs) {
+        $img = $Config.Iso.Images.($d.Image)
+        $label = [string]$img.Description -replace ' \((en-US|ISO supplied by the tester)\)$', ''
+        & $remote $d $osCheck @(([string]$img.CaptionPattern), $label)
+    }
+
     # --- Forest root DC: domain, DC list, accounts, groups, DNS, CA publication ---
     $dcCheck = & $newCheck @'
 param($Fqdn, $NetBios, $DcNames, $OuRoot, $GroupsJson, $AccountsJson, $AllNames, $CAName, $ExpectMembers)
-Import-Module ActiveDirectory
+$env:ADPS_LoadDefaultDrive = 0; Import-Module ActiveDirectory -WarningAction SilentlyContinue
 $dom = Get-ADDomain
 & $c "Domain FQDN is $Fqdn" ($dom.DNSRoot -ieq $Fqdn) $dom.DNSRoot
 & $c "NetBIOS name is $NetBios" ($dom.NetBIOSName -ieq $NetBios) $dom.NetBIOSName
@@ -124,7 +137,7 @@ foreach ($s in @('NTDS', 'DNS', 'Netlogon', 'ADWS', 'Kdc')) {
     & $c "Service $s running" ($svc -and $svc.Status -eq 'Running') $st
 }
 if ($Multi) {
-    Import-Module ActiveDirectory
+    $env:ADPS_LoadDefaultDrive = 0; Import-Module ActiveDirectory -WarningAction SilentlyContinue
     $f = @(Get-ADReplicationFailure -Target $env:COMPUTERNAME -ErrorAction SilentlyContinue | Where-Object { $_.FailureCount -gt 0 })
     & $c 'AD replication without failures' ($f.Count -eq 0) "$($f.Count) failure(s)"
 }
@@ -260,8 +273,6 @@ return $out.ToArray()
     $wsCheck = & $newCheck @'
 param($Fqdn, $AdminGroup)
 $cs = Get-CimInstance Win32_ComputerSystem
-$os = Get-CimInstance Win32_OperatingSystem
-& $c 'OS is Windows 11 Enterprise LTSC' ($os.Caption -like '*Windows 11*LTSC*') "$($os.Caption) $($os.BuildNumber)"
 & $c "Member of $Fqdn" ($cs.PartOfDomain -and $cs.Domain -ieq $Fqdn) $cs.Domain
 & $c 'Secure channel to DC' (Test-ComputerSecureChannel -ErrorAction SilentlyContinue) ''
 if ($AdminGroup) {

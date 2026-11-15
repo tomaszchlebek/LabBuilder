@@ -36,7 +36,7 @@ function Grant-LabCertificateTemplateEnroll {
     $r = Invoke-LabVMCommand -VMName $rootDc.VMName -Credential $cred -RetryCount 3 -RetryDelaySeconds 20 -ArgumentList $TemplateName, $ComputerName -ScriptBlock {
         param($Template, $Computer)
         $ErrorActionPreference = 'Stop'
-        Import-Module ActiveDirectory
+        Import-Module ActiveDirectory -WarningAction SilentlyContinue   # keeps the AD: drive - Get-Acl/Set-Acl below need it
         $configNc = (Get-ADRootDSE).configurationNamingContext
         $dn = "CN=$Template,CN=Certificate Templates,CN=Public Key Services,CN=Services,$configNc"
         # Templates live in the configuration partition; a -Filter search would only look in the domain partition.
@@ -105,10 +105,10 @@ function Install-LabDomainController {
         Set-LabVMNetwork -VMName $vm -Credential $local -IPAddress $root.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers @($root.IPAddress)
 
         Write-LabLog "Promoting $($root.Name) to the first DC of new forest $fqdn ($nb) - 5 to 15 minutes ..." -Level STEP
+        $null = Install-LabWindowsFeature -VMName $vm -Credential $local -Name 'AD-Domain-Services' -TimeoutMinutes $timeout
         $res = Invoke-LabVMCommand -VMName $vm -Credential $local -ArgumentList $fqdn, $nb, $Config.Domain.DomainMode, $Config.Domain.ForestMode, $AdminCredential -ScriptBlock {
             param($Fqdn, $NetBios, $DomainMode, $ForestMode, $Cred)
             $ErrorActionPreference = 'Stop'
-            Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
             Import-Module ADDSDeployment
             $r = Install-ADDSForest -DomainName $Fqdn -DomainNetbiosName $NetBios -DomainMode $DomainMode -ForestMode $ForestMode `
                 -InstallDns -SafeModeAdministratorPassword $Cred.Password -NoRebootOnCompletion -Force -WarningAction SilentlyContinue
@@ -126,10 +126,11 @@ function Install-LabDomainController {
     # --- Directory content ---
     Write-LabLog 'Creating OUs, security groups, domain admin accounts and test users ...' -Level STEP
     $groupsJson = ConvertTo-Json -InputObject @($Config.Groups) -Depth 5 -Compress
-    $summary = Invoke-LabVMCommand -VMName $vm -Credential $domainCred -RetryCount 2 -ArgumentList ([string]$Config.Domain.OuRoot), $groupsJson, $AccountsJson -ScriptBlock {
+    $summary = Invoke-LabVMCommand -VMName $vm -Credential $domainCred -RetryCount 5 -RetryDelaySeconds 30 -ArgumentList ([string]$Config.Domain.OuRoot), $groupsJson, $AccountsJson -ScriptBlock {
         param($OuRoot, $GroupsJson, $AccountsJson)
         $ErrorActionPreference = 'Stop'
-        Import-Module ActiveDirectory
+        $env:ADPS_LoadDefaultDrive = 0
+        Import-Module ActiveDirectory -WarningAction SilentlyContinue
         $domain = Get-ADDomain
         $domainDn = $domain.DistinguishedName
         $rootDn = "OU=$OuRoot,$domainDn"
@@ -192,10 +193,10 @@ function Install-LabDomainController {
         Wait-LabVMReady -VMName $dc.VMName -Credential $local -TimeoutMinutes $timeout | Out-Null
         Set-LabVMNetwork -VMName $dc.VMName -Credential $local -IPAddress $dc.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers @($root.IPAddress)
         Write-LabLog "Promoting $($dc.Name) to an additional domain controller (DNS, GC) ..." -Level STEP
+        $null = Install-LabWindowsFeature -VMName $dc.VMName -Credential $local -Name 'AD-Domain-Services' -TimeoutMinutes $timeout
         $res = Invoke-LabVMCommand -VMName $dc.VMName -Credential $local -RetryCount 3 -RetryDelaySeconds 60 -ArgumentList $fqdn, $domainCred, $AdminCredential -ScriptBlock {
             param($Fqdn, $DomainCred, $Dsrm)
             $ErrorActionPreference = 'Stop'
-            Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
             Import-Module ADDSDeployment
             $r = Install-ADDSDomainController -DomainName $Fqdn -Credential $DomainCred -InstallDns -SafeModeAdministratorPassword $Dsrm.Password `
                 -NoRebootOnCompletion -Force -WarningAction SilentlyContinue
@@ -277,12 +278,12 @@ function Install-LabServerRole {
     if ($d.Roles -contains 'ADCS') {
         $caName = Get-LabCAName -Config $Config
         Write-LabLog "  [$($d.Name)] AD CS Enterprise Root CA '$caName' ..." -Level STEP
+        $null = Install-LabWindowsFeature -VMName $d.VMName -Credential $cred -Name 'ADCS-Cert-Authority'
         $r = Invoke-LabVMCommand -VMName $d.VMName -Credential $cred -RetryCount 2 -ArgumentList $caName, ([int]$Config.Domain.CAValidityYears) -ScriptBlock {
             param($CAName, $Years)
             $ErrorActionPreference = 'Stop'
             $active = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration' -Name Active -ErrorAction SilentlyContinue).Active
             if ($active) { return "exists: $active" }
-            Install-WindowsFeature -Name ADCS-Cert-Authority -IncludeManagementTools | Out-Null
             Install-AdcsCertificationAuthority -CAType EnterpriseRootCA -CACommonName $CAName `
                 -CryptoProviderName 'RSA#Microsoft Software Key Storage Provider' -KeyLength 4096 -HashAlgorithmName SHA256 `
                 -ValidityPeriod Years -ValidityPeriodUnits $Years -Force -WarningAction SilentlyContinue | Out-Null
@@ -297,11 +298,10 @@ function Install-LabServerRole {
         $start = '{0}.{1}' -f $prefix, $Config.Roles.DHCP.RangeStartOctet
         $end = '{0}.{1}' -f $prefix, $Config.Roles.DHCP.RangeEndOctet
         Write-LabLog "  [$($d.Name)] DHCP Server, scope $start - $end ..." -Level STEP
+        $null = Install-LabWindowsFeature -VMName $d.VMName -Credential $cred -Name 'DHCP'
         Invoke-LabVMCommand -VMName $d.VMName -Credential $cred -RetryCount 2 -ArgumentList "$($d.Name).$fqdn", $d.IPAddress, "$prefix.0", $start, $end, ([string[]](Get-LabDcIPs -Config $Config)), $fqdn -ScriptBlock {
             param($DnsName, $IP, $ScopeId, $Start, $End, $Dns, $Fqdn)
             $ErrorActionPreference = 'Stop'
-            $f = Install-WindowsFeature -Name DHCP -IncludeManagementTools
-            if (-not $f.Success) { throw 'DHCP feature install failed.' }
             if (-not (Get-DhcpServerInDC | Where-Object { $_.IPAddress -eq $IP })) { Add-DhcpServerInDC -DnsName $DnsName -IPAddress $IP }
             & netsh.exe dhcp add securitygroups | Out-Null
             Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\ServerManager\Roles\12' -Name ConfigurationState -Value 2 -ErrorAction SilentlyContinue
@@ -318,11 +318,10 @@ function Install-LabServerRole {
         $share = [string]$Config.Roles.FileServer.ShareName
         $firstGroup = [string](@($Config.Groups)[0].Name)
         Write-LabLog "  [$($d.Name)] File Server, share \\$($d.Name)\$share ..." -Level STEP
+        $null = Install-LabWindowsFeature -VMName $d.VMName -Credential $cred -Name 'FS-FileServer'
         Invoke-LabVMCommand -VMName $d.VMName -Credential $cred -RetryCount 2 -ArgumentList $share, ([string]$Config.Roles.FileServer.Path), $nb, $firstGroup -ScriptBlock {
             param($Share, $Path, $NetBios, $Group)
             $ErrorActionPreference = 'Stop'
-            $f = Install-WindowsFeature -Name FS-FileServer -IncludeManagementTools
-            if (-not $f.Success) { throw 'FS-FileServer install failed.' }
             if (-not (Test-Path -LiteralPath $Path)) { New-Item -ItemType Directory -Path $Path -Force | Out-Null }
             $groupAccount = "$NetBios\$Group"
             $domainSid = (New-Object System.Security.Principal.NTAccount($groupAccount)).Translate([System.Security.Principal.SecurityIdentifier]).AccountDomainSid
@@ -338,11 +337,10 @@ function Install-LabServerRole {
 
     if ($d.Roles -contains 'IIS') {
         Write-LabLog "  [$($d.Name)] IIS: $(@($Config.Roles.IIS.Features) -join ', ')" -Level STEP
-        Invoke-LabVMCommand -VMName $d.VMName -Credential $cred -RetryCount 1 -ArgumentList ([string[]]@($Config.Roles.IIS.Features)), $d.Name, $fqdn -ScriptBlock {
-            param($Features, $Name, $Fqdn)
+        $null = Install-LabWindowsFeature -VMName $d.VMName -Credential $cred -Name ([string[]]@($Config.Roles.IIS.Features))
+        Invoke-LabVMCommand -VMName $d.VMName -Credential $cred -RetryCount 1 -ArgumentList $d.Name, $fqdn -ScriptBlock {
+            param($Name, $Fqdn)
             $ErrorActionPreference = 'Stop'
-            $r = Install-WindowsFeature -Name $Features -IncludeManagementTools
-            if (-not $r.Success) { throw "Install-WindowsFeature failed: $($r.ExitCode)" }
             $page = "<!DOCTYPE html><html><head><title>Lab IIS</title></head><body><h1>LAB-IIS-OK</h1><p>$Name.$Fqdn</p></body></html>"
             Set-Content -LiteralPath 'C:\inetpub\wwwroot\lab-health.html' -Value $page -Encoding ASCII
         } | Out-Null
@@ -382,13 +380,7 @@ function Install-LabServerRole {
 
     if (@($d.AdditionalFeatures).Count -gt 0) {
         Write-LabLog "  [$($d.Name)] additional features: $($d.AdditionalFeatures -join ', ')" -Level STEP
-        Invoke-LabVMCommand -VMName $d.VMName -Credential $cred -RetryCount 1 -ArgumentList (, [string[]]$d.AdditionalFeatures) -ScriptBlock {
-            param($Features)
-            $ErrorActionPreference = 'Stop'
-            $r = Install-WindowsFeature -Name $Features -IncludeManagementTools
-            if (-not $r.Success) { throw "Install-WindowsFeature failed: $($r.ExitCode)" }
-            if ($r.RestartNeeded -eq 'Yes') { return 'restart' }
-        } | Out-Null
+        $null = Install-LabWindowsFeature -VMName $d.VMName -Credential $cred -Name ([string[]]$d.AdditionalFeatures)
         Write-LabLog "  [$($d.Name)] additional features installed." -Level OK
     }
 }
@@ -396,7 +388,7 @@ function Install-LabServerRole {
 function Install-LabWorkstation {
     <#
     .SYNOPSIS
-        Phase Workstations: creates all Windows 11 VMs, then joins each to the domain (FR-11).
+        Phase Workstations: creates all workstation VMs (Windows 11 LTSC or Windows 10, ADR 0013), then joins each to the domain (FR-11).
     #>
     [CmdletBinding()]
     param(
@@ -455,14 +447,24 @@ function Wait-LabADReady {
     Write-LabLog "  waiting for Active Directory on $VMName ..."
     $fqdn = [string]$Config.Domain.Fqdn
     $deadline = (Get-Date).AddMinutes([int]$Config.Timeouts.AdReadyMinutes)
+    # Ready = what the next steps use: ADWS on this DC AND default-server discovery (DC locator finds a DC with ADWS).
+    # On a new forest the local ADWS answers a minute or two before discovery works (tester run 2026-11-15:
+    # "Unable to find a default server with Active Directory Web Services running"), so both must pass twice in a row.
+    $ok = 0
     while ((Get-Date) -lt $deadline) {
         try {
             $r = Invoke-Command -VMName $VMName -Credential $DomainCredential -ErrorAction Stop -ScriptBlock {
-                Import-Module ActiveDirectory
-                (Get-ADDomain -Server $env:COMPUTERNAME).DNSRoot
+                $env:ADPS_LoadDefaultDrive = 0   # no AD: drive -> no "Error initializing default drive" warnings
+                $ErrorActionPreference = 'Stop'
+                Import-Module ActiveDirectory -WarningAction SilentlyContinue
+                $local = (Get-ADDomain -Server $env:COMPUTERNAME).DNSRoot
+                $null = Get-ADDomainController -Discover -Service ADWS -ForceDiscover
+                $default = (Get-ADDomain).DNSRoot
+                if ($local -ieq $default) { $default } else { '' }
             }
-            if ($r -ieq $fqdn) { Write-LabLog "  Active Directory answers on $VMName." -Level OK; return }
-        } catch { }
+            if ($r -ieq $fqdn) { $ok++ } else { $ok = 0 }
+            if ($ok -ge 2) { Write-LabLog "  Active Directory answers on $VMName (ADWS + DC discovery)." -Level OK; return }
+        } catch { $ok = 0 }
         Start-Sleep -Seconds 20
     }
     throw "Active Directory on $VMName did not become ready in $($Config.Timeouts.AdReadyMinutes) min."

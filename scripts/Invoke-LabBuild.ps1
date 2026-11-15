@@ -23,7 +23,8 @@
 .PARAMETER ConfigPath
     Config file; default config\lab.config.psd1, else config\lab.config.example.psd1.
 .PARAMETER LabRoot
-    Folder on this host for ISOs, base images, VMs, logs (overrides Paths.LabRoot).
+    Folder of this lab on the host: VMs, logs, reports, lab.json (overrides Paths.LabRoot). ISOs and base images are in
+    the shared image library (Paths.LibraryRoot, default <LabRoot drive>:\LabBuilder-Library).
 .PARAMETER LabAdminCredential
     Optional lab administrator password (user name is ignored). Default: generated once and reused.
 .PARAMETER AdminPasswordFromStdin
@@ -73,6 +74,8 @@ $config = Import-LabConfig -Path $ConfigPath -Overrides @{
     'Paths.LabRoot'      = $LabRoot
 }
 $errors = @(Test-LabConfig -Config $config -Scope Full)
+# Another lab on this host with the same name, lab folder or switch (checked before anything is written).
+if ($errors.Count -eq 0) { $errors = @(Test-LabHostConflict -Config $config -OutputRoot (Join-Path $repo 'output')) }
 if ($errors.Count -gt 0) {
     $errors | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
     throw "Configuration is not valid ($ConfigPath)."
@@ -136,7 +139,7 @@ try {
             $_
         })
         $wrong = @($accounts | Where-Object { $_.UserPrincipalName -notlike "*@$upnSuffix" })
-        if ($wrong.Count -gt 0) { throw "$accFile belongs to another domain (UPN suffix). Remove the lab (Remove-Lab.ps1 -RemoveOutput) or move the file away." }
+        if ($wrong.Count -gt 0) { throw "Lab name '$($config.LabName)' is already used by a lab of another domain ($accFile). Choose another lab name, or remove the old lab first (Remove-Lab.ps1 -ConfigPath <old lab config> -RemoveOutput)." }
         Write-LabLog "Using existing account plan $accFile"
     }
     $haveAdmins = @($accounts | Where-Object Type -eq 'DomainAdmin').Count
@@ -216,11 +219,14 @@ try {
     }
     if ($validation) { [void]$sb.AppendLine("- Validation: $($validation.Passed) passed, $($validation.Failed) failed - $($validation.ReportPath)") }
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine('| VM (Hyper-V) | Computer | Type | Roles | IP | vCPU | RAM | Disk (dynamic) |')
-    [void]$sb.AppendLine('|---|---|---|---|---|---|---|---|')
+    [void]$sb.AppendLine("- Image library (shared by all labs): $(Get-LabLibraryRoot -Config $config); lab manifest: $(Join-Path $config.Paths.LabRoot 'lab.json')")
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('| VM (Hyper-V) | Computer | Type | OS | Roles | IP | vCPU | RAM | Disk (dynamic) |')
+    [void]$sb.AppendLine('|---|---|---|---|---|---|---|---|---|')
     foreach ($d in $defs) {
         $roles = @($d.Roles + $d.AdditionalFeatures); if ($d.Role -eq 'DomainController') { $roles = @('AD DS', 'DNS') + $roles }
-        [void]$sb.AppendLine(("| {0} | {1}.{2} | {3} | {4} | {5} | {6} | {7:N0} GB | {8:N0} GB |" -f $d.VMName, $d.Name, $config.Domain.Fqdn, $d.Role, ($roles -join ', '), $d.IPAddress, $d.ProcessorCount, ($d.MemoryBytes / 1GB), ($d.DiskSizeBytes / 1GB)))
+        $osName = [string]$config.Iso.Images.($d.Image).Description -replace ' \((en-US|ISO supplied by the tester)\)$', ''
+        [void]$sb.AppendLine(("| {0} | {1}.{2} | {3} | {4} | {5} | {6} | {7} | {8:N0} GB | {9:N0} GB |" -f $d.VMName, $d.Name, $config.Domain.Fqdn, $d.Role, $osName, ($roles -join ', '), $d.IPAddress, $d.ProcessorCount, ($d.MemoryBytes / 1GB), ($d.DiskSizeBytes / 1GB)))
     }
     $summary = Join-Path $outDir 'lab-summary.md'
     Set-Content -LiteralPath $summary -Value $sb.ToString() -Encoding UTF8

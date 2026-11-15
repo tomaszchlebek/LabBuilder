@@ -1,6 +1,6 @@
 # Roadmap — LabBuilder after 1.1.0
 
-- **Date:** 2026-11-15 · **Status:** proposed (from the requester's idea list) · **Current release:** 1.1.0
+- **Date:** 2026-11-15 · **Status:** in progress — 1.1.1 and 1.2.0 released · **Current release:** 1.2.0
 
 The requester's list was reordered and merged so that shared groundwork is built **once** and every later version reuses
 it. Each version ships the usual way: requirements → code + tests → docs/DEVLOG/CHANGELOG/ADR → exe rebuild → tester
@@ -10,8 +10,8 @@ host run → **commit, tag and GitHub release** (requester: "update github repos
 
 | New | Was | Content | Why here |
 |-----|-----|---------|----------|
-| **1.1.1** | 1.1.1 + 1.1.2 | Wizard: ITOM Solutions branding, opens maximised, freely resizable; release script | Same file (`WizardForm.cs`), one layout pass; branding assets already exist in the IT Portal project |
-| **1.2.0** | 1.1.5 + 1.1.3 | Shared **image library** (ISOs + base images once for all labs) **and OS choice** per VM; lab manifest/tags; generic media downloader | Both rewrite the same image catalog and BaseImages phase; tags make 1.4.0 cheap |
+| **1.1.1** ✔ | 1.1.1 + 1.1.2 | Wizard: ITOM Solutions branding, opens maximised, freely resizable; release script (released 2026-11-15) | Same file (`WizardForm.cs`), one layout pass; branding assets already exist in the IT Portal project |
+| **1.2.0** ✔ | 1.1.5 + 1.1.3 | Shared **image library** (ISOs + base images once for all labs) **and OS choice** per VM; lab manifest/tags (released 2026-11-15, ADR 0013; generic media downloader moved to 1.5.0) | Both rewrite the same image catalog and BaseImages phase; tags make 1.4.0 cheap |
 | **1.3.0** | 1.1.6 | **Parallel build** (downloads, base images, disk copies, member servers, workstations) + progress events | Needs the final image pipeline from 1.2.0; events reused by wizard and web UI |
 | **1.3.1** | 1.1.4 | **Host compatibility** Server 2019 / 2022 / 2025 with Hyper-V; nested-virtualization option | Test hosts are built *by LabBuilder itself* (needs OS choice); tests the final parallel engine once |
 | **1.4.0** | 1.2.0 | **Discover** existing labs and **delete** a chosen lab completely | Uses the manifest/tags from 1.2.0 |
@@ -30,9 +30,9 @@ is the largest single role and profits from everything before it.
 |------|----------|-----------|
 | Release script `scripts/Publish-LabRelease.ps1` (version bump check, tests, exe build, tag, `gh release`) | 1.1.1 | every version |
 | Branding assets (`installer/branding`, from IT Portal ADR 0014: mark `#C6F277`/`#111A24`, Segoe UI, wordmark "**ITOM** Solutions") | 1.1.1 | 3.0.0 web UI |
-| **Image library** `<LibraryRoot>\{ISO,BaseImages,Packages}` outside any lab | 1.2.0 | all labs, 1.4.0 (never deleted with a lab) |
-| **Generic media downloader** (allow-listed URL, signature or hash check, manifest) — generalised from `Save-LabSqlMedia` | 1.2.0 | Exchange prereqs, IT Portal packages, VyOS |
-| **Lab manifest** `<LabRoot>\Labs\<Lab>\lab.json` + VM Notes tag `LabBuilder:<Lab>` | 1.2.0 | 1.4.0 discovery, 3.0.0 |
+| **Image library** `<LibraryRoot>\{ISO,BaseImages}` outside any lab (+ `Packages` in 1.5.0), host-wide lock per item | 1.2.0 ✔ | all labs, 1.4.0 (never deleted with a lab) |
+| **Generic media downloader** (allow-listed URL, signature or hash check, manifest) — generalised from `Save-LabSqlMedia` | 1.5.0 (first new user) | IT Portal packages, Exchange prereqs, VyOS |
+| **Lab manifest** `<LabRoot>\lab.json` + VM Notes tag `LabBuilder:<Lab>` | 1.2.0 ✔ | 1.4.0 discovery, 3.0.0 |
 | **Progress events** (JSON lines per phase/VM) + per-VM logs | 1.3.0 | wizard progress, 3.0.0 |
 | Nested virtualization option per VM | 1.3.1 | host test matrix, future Hyper-V-in-lab |
 

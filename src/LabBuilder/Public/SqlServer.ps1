@@ -146,11 +146,11 @@ function Save-LabSqlMedia {
 }
 
 function Import-LabSqlMedia {
-    # Copies <Source>\SQL\<package> (pre-downloaded with Get-LabIso.ps1 -IncludeSql) into <LabRoot>\ISO\SQL.
+    # Copies <Source>\SQL\<package> (pre-downloaded with Get-LabIso.ps1 -IncludeSql) into the image library <Library>\ISO\SQL.
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$Source)
     $src = Join-Path $Source 'SQL'
-    $dst = Join-Path ([string]$Config.Paths.LabRoot) 'ISO\SQL'
+    $dst = Join-Path (Get-LabLibraryIsoFolder -Config $Config) 'SQL'
     if (Confirm-LabSqlPackage -Folder $dst) { Write-LabLog 'SQL media already on the host.' -Level OK; return }
     $pkg = Get-ChildItem -LiteralPath $src -Filter ([string]$Config.Roles.SQL.PackagePattern) -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 1
     if (-not $pkg) { Write-LabLog "No SQL media in $src - it will be downloaded." -Level WARN; return }
@@ -165,7 +165,7 @@ function Import-LabSqlMedia {
 
 function Get-LabSqlMediaPath {
     param([Parameter(Mandatory)]$Config)
-    $dir = Join-Path ([string]$Config.Paths.LabRoot) 'ISO\SQL'
+    $dir = Join-Path (Get-LabLibraryIsoFolder -Config $Config) 'SQL'
     $m = Confirm-LabSqlPackage -Folder $dir
     if (-not $m) { throw "SQL Server media missing or not verified in $dir - run phase Iso." }
     return (Join-Path $dir ([string]$m.FileName))

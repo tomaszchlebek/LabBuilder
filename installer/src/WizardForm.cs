@@ -57,10 +57,11 @@ namespace LabBuilderSetup
         Button btnBack, btnNext, btnCancel, btnLoad, btnSave;
 
         // controls
-        TextBox tInstall, tLabName, tLabRoot, tFqdn, tNetBios, tPw1, tPw2, tSwitch, tPrefix, tWsPrefix, tGroups, tIsoFolder, tShare, tSummary, tLog;
+        TextBox tInstall, tLabName, tLabRoot, tLibrary, tWin10Iso, tFqdn, tNetBios, tPw1, tPw2, tSwitch, tPrefix, tWsPrefix, tGroups, tIsoFolder, tShare, tSummary, tLog;
         TextBox tSqlInstance, tSqlDb, tSqlCollation;
         NumericUpDown nSqlPort;
         RadioButton rSqlWin, rSqlMixed;
+        ComboBox cbWsOs;
         CheckedListBox clSqlSys, clSqlOwners;
         Label lblSqlState;
         RadioButton rGen, rEnter, rPrivate, rInternal, rDownload, rIsoFolder, rLocalAdminNo, rLocalAdminYes;
@@ -118,7 +119,7 @@ namespace LabBuilderSetup
             var szBy = measure("by ITOM Solutions", Font);
             int brandW = markSize + gap + Math.Max(szBrand.Width, szBy.Width);
             int textW = Math.Max(brandW, Math.Max(measure("Hyper-V TEST environment", Font).Width,
-                        Math.Max(measure("Better operations. Better outcomes.", fSmall).Width, measure("▶ Domain controllers", fStep).Width + Px(12))));
+                        Math.Max(measure("Better operations. Better outcomes.", fSmall).Width, measure("\u25B6 Domain controllers", fStep).Width + Px(12))));
             var left = new Panel { Dock = DockStyle.Left, Width = Math.Max(Px(200), padL + textW + padR + Px(8)), BackColor = Brand.Ink, Padding = new Padding(padL, Px(14), padR, Px(10)) };
 
             int brandH = Math.Max(markSize, szBrand.Height + szBy.Height + Px(2));
@@ -349,8 +350,10 @@ namespace LabBuilderSetup
             var t = Grid();
             Note(t, "This wizard installs LabBuilder on this Hyper-V host and builds an isolated test lab: an Active Directory forest " +
                     "with domain controllers, a certificate authority, member servers with the roles you choose, and domain-joined " +
-                    "Windows 11 Enterprise LTSC workstations, optionally SQL Server 2025 Express. Windows Server 2025 and Windows 11 " +
-                    "evaluation ISOs (and the SQL Server Express media) are downloaded from Microsoft and verified.");
+                    "workstations, optionally SQL Server 2025 Express. You choose the operating system of every server (Windows Server " +
+                    "2025, 2022 or 2019) and of the workstations (Windows 11 Enterprise LTSC, or Windows 10 Enterprise from your own ISO). " +
+                    "Evaluation ISOs (and the SQL Server Express media) are downloaded from Microsoft, verified and kept in an image " +
+                    "library that every later lab reuses.");
             Heading(t, "Prerequisite check");
             lvPrereq = new ListView { View = View.Details, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, Width = 720, Height = 260, Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top };
             // Detail column takes the remaining width so the list fits the page at any scaling.
@@ -419,8 +422,24 @@ namespace LabBuilderSetup
             Note(t, "1-15 letters, digits or '-'. Hyper-V VM names are <LabName>-<ComputerName>.");
             tLabRoot = Text_(S.LabRoot, 420);
             Row(t, "Lab folder on this host", WithBrowse(tLabRoot, true));
+            Note(t, "This lab's VM disks, logs, reports and lab.json.");
+            tLibrary = Text_(S.LibraryRoot, 420);
+            Row(t, "Image library folder", WithBrowse(tLibrary, true));
+            Note(t, "Shared by ALL labs on this host: the ISOs and one base image per operating system are downloaded and " +
+                    "built once and reused by every later lab. Media of labs built with LabBuilder 1.0/1.1 is moved here automatically.");
             lblDisk = Note(t, "");
-            tLabRoot.TextChanged += (s, e) => UpdateDiskNote();
+            string lastDefaultLib = LabSettings.DefaultLibraryFor(S.LabRoot);
+            tLabRoot.TextChanged += (s, e) =>
+            {
+                // keep the library on the lab drive while the tester has not chosen another folder
+                if (tLibrary.Text == lastDefaultLib && Regex.IsMatch(tLabRoot.Text, @"^[A-Za-z]:"))
+                {
+                    lastDefaultLib = LabSettings.DefaultLibraryFor(tLabRoot.Text);
+                    tLibrary.Text = lastDefaultLib;
+                }
+                UpdateDiskNote();
+            };
+            tLibrary.TextChanged += (s, e) => UpdateDiskNote();
             return new Page
             {
                 Step = "Install & lab", Title = "Installation and lab folder", Subtitle = "Where LabBuilder and the virtual machines are stored", Content = t,
@@ -431,7 +450,12 @@ namespace LabBuilderSetup
                     if (!Regex.IsMatch(tLabName.Text, @"^[A-Za-z0-9][A-Za-z0-9-]{0,14}$")) return Fail("Lab name must be 1-15 letters, digits or '-'.", tLabName);
                     if (!Regex.IsMatch(tLabRoot.Text, @"^[A-Za-z]:\\")) return Fail("Lab folder must be an absolute path on a local drive, e.g. D:\\HyperVLab.", tLabRoot);
                     if (!Directory.Exists(Path.GetPathRoot(tLabRoot.Text))) return Fail("Drive " + Path.GetPathRoot(tLabRoot.Text) + " does not exist.", tLabRoot);
+                    if (!Regex.IsMatch(tLibrary.Text, @"^[A-Za-z]:\\")) return Fail("Image library folder must be an absolute path on a local drive, e.g. D:\\LabBuilder-Library.", tLibrary);
+                    if (!Directory.Exists(Path.GetPathRoot(tLibrary.Text))) return Fail("Drive " + Path.GetPathRoot(tLibrary.Text) + " does not exist.", tLibrary);
+                    var lab = tLabRoot.Text.TrimEnd('\\') + "\\"; var lib = tLibrary.Text.TrimEnd('\\') + "\\";
+                    if (lib.StartsWith(lab, StringComparison.OrdinalIgnoreCase)) return Fail("The image library is shared by all labs - choose a folder outside the lab folder.", tLibrary);
                     S.InstallDir = tInstall.Text.TrimEnd('\\'); S.LabName = tLabName.Text; S.LabRoot = tLabRoot.Text.TrimEnd('\\');
+                    S.LibraryRoot = tLibrary.Text.TrimEnd('\\');
                     return true;
                 }
             };
@@ -442,8 +466,12 @@ namespace LabBuilderSetup
             try
             {
                 var d = new DriveInfo(Path.GetPathRoot(tLabRoot.Text));
-                lblDisk.Text = string.Format("Free space on {0}: {1:N0} GB. Needed: ~45 GB for ISOs and base images plus the VM disks " +
-                    "(dynamic - they start at ~15 GB each and grow up to the size you choose).", d.Name, d.AvailableFreeSpace / 1073741824.0);
+                var l = new DriveInfo(Path.GetPathRoot(tLibrary.Text));
+                string libPart = d.Name.Equals(l.Name, StringComparison.OrdinalIgnoreCase) ? "" :
+                    string.Format(" Free space on {0} (image library): {1:N0} GB.", l.Name, l.AvailableFreeSpace / 1073741824.0);
+                lblDisk.Text = string.Format("Free space on {0}: {1:N0} GB.{2} Needed: ~20 GB in the library per operating system not yet there " +
+                    "(ISO + base image), plus the VM disks (dynamic - they start at ~15 GB each and grow up to the size you choose).",
+                    d.Name, d.AvailableFreeSpace / 1073741824.0, libPart);
             }
             catch { lblDisk.Text = "Enter a path on a local drive."; }
         }
@@ -557,6 +585,7 @@ namespace LabBuilderSetup
             var cols = new List<DataGridViewColumn>
             {
                 new DataGridViewTextBoxColumn { Name = "Name", HeaderText = "Computer name" },
+                OsColumn(),
                 new DataGridViewTextBoxColumn { Name = "Octet", HeaderText = "IP .x" },
                 new DataGridViewTextBoxColumn { Name = "Cpu", HeaderText = "vCPU" },
                 new DataGridViewTextBoxColumn { Name = "Mem", HeaderText = "RAM GB" },
@@ -570,6 +599,8 @@ namespace LabBuilderSetup
                 g.Columns.Add(c);
             }
             g.Columns["Name"].MinimumWidth = Math.Max(g.Columns["Name"].MinimumWidth, TextRenderer.MeasureText("WWWWWWWWWWW", g.Font).Width);   // room to type a 15-char name
+            g.Columns["OS"].MinimumWidth = TextRenderer.MeasureText(OsCatalog.Display("Server2025"), g.Font).Width + pad * 2;   // text + drop-down arrow
+            g.DataError += (s, e) => { e.ThrowException = false; };   // a value not in the list (old config) must not crash the grid
             g.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "Features", HeaderText = "Extra Windows features (comma separated)", SortMode = DataGridViewColumnSortMode.NotSortable,
@@ -580,6 +611,14 @@ namespace LabBuilderSetup
             return g;
         }
 
+        // Operating system per server (ADR 0013): Windows Server 2025 / 2022 / 2019 evaluation.
+        static DataGridViewComboBoxColumn OsColumn()
+        {
+            var c = new DataGridViewComboBoxColumn { Name = "OS", HeaderText = "Operating system", FlatStyle = FlatStyle.Flat, DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox };
+            foreach (var k in OsCatalog.ServerKeys) c.Items.Add(OsCatalog.Display(k));
+            return c;
+        }
+
         static void FillGrid(DataGridView g, List<ServerSpec> list)
         {
             g.Rows.Clear();
@@ -588,7 +627,8 @@ namespace LabBuilderSetup
 
         static void AddGridRow(DataGridView g, ServerSpec s)
         {
-            var values = new List<object> { s.Name, s.HostOctet, s.Cpu, s.MemoryGB, s.DiskGB };
+            var os = OsCatalog.ServerKeys.Contains(s.Image) ? s.Image : OsCatalog.DefaultServer;
+            var values = new List<object> { s.Name, OsCatalog.Display(os), s.HostOctet, s.Cpu, s.MemoryGB, s.DiskGB };
             foreach (var r in GridRoles(g)) values.Add(s.Roles.Contains(r));
             values.Add(string.Join(", ", s.Features));
             g.Rows.Add(values.ToArray());
@@ -620,6 +660,8 @@ namespace LabBuilderSetup
                 if (!int.TryParse(Convert.ToString(row.Cells["Mem"].Value), out mem) || mem < 2 || mem > 512) return Fail(what + " " + name + ": RAM must be 2-512 GB.", g);
                 if (!int.TryParse(Convert.ToString(row.Cells["Disk"].Value), out disk) || disk < 40 || disk > 2048) return Fail(what + " " + name + ": disk must be 40-2048 GB (dynamic).", g);
                 var s = new ServerSpec(name.ToUpperInvariant(), octet, cpu, mem, disk);
+                s.Image = OsCatalog.KeyOf(Convert.ToString(row.Cells["OS"].Value));
+                if (!OsCatalog.ServerKeys.Contains(s.Image)) return Fail(what + " " + name + ": choose the operating system.", g);
                 foreach (var r in GridRoles(g)) if (Convert.ToBoolean(row.Cells[r].Value ?? false)) s.Roles.Add(r);
                 foreach (var f in Convert.ToString(row.Cells["Features"].Value).Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries))
                 {
@@ -637,6 +679,7 @@ namespace LabBuilderSetup
             nDcCount = Num(1, 5, S.DomainControllers.Count);
             Row(t, "Number of domain controllers", nDcCount);
             Note(t, "DC 1 creates the forest (AD DS + DNS); the others join it as additional DCs with DNS and Global Catalog. " +
+                    "Each DC can run Windows Server 2025, 2022 or 2019 (functional level 2016 works with all of them). " +
                     "Tick the extra roles each DC should get. ADCS = Enterprise Root CA (one per lab). Disks are always dynamic.");
             gDc = ServerGrid(RoleCatalog.DomainController);
             t.RowCount++; t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -644,7 +687,7 @@ namespace LabBuilderSetup
             nDcCount.ValueChanged += (s, e) => SyncRows(gDc, (int)nDcCount.Value, "DC", 10, null);
             return new Page
             {
-                Step = "Domain controllers", Title = "Domain controllers", Subtitle = "How many, their size and roles", Content = t,
+                Step = "Domain controllers", Title = "Domain controllers", Subtitle = "How many, their operating system, size and roles", Content = t,
                 Enter = () => { if (gDc.Rows.Count == 0) FillGrid(gDc, S.DomainControllers); },
                 Leave = () =>
                 {
@@ -661,7 +704,7 @@ namespace LabBuilderSetup
             var t = Grid();
             nMsCount = Num(0, 10, S.MemberServers.Count);
             Row(t, "Number of member servers", nMsCount);
-            Note(t, "Domain-joined Windows Server 2025 servers in OU=Servers. Tick the roles for each server; add any other Windows " +
+            Note(t, "Domain-joined servers in OU=Servers; choose each server's operating system. Tick the roles for each server; add any other Windows " +
                     "feature names (e.g. RSAT-AD-Tools, Telnet-Client) in the last column. SQL = SQL Server 2025 Express, " +
                     "installed unattended with the options on the 'SQL Server' page.");
             gMs = ServerGrid(RoleCatalog.All);
@@ -677,7 +720,7 @@ namespace LabBuilderSetup
             Row(t, "File Server share name", tShare);
             return new Page
             {
-                Step = "Member servers", Title = "Member servers and roles", Subtitle = "Which servers and which roles on each", Content = t,
+                Step = "Member servers", Title = "Member servers and roles", Subtitle = "Which servers, their operating system and the roles on each", Content = t,
                 Enter = () => { if (gMs.Rows.Count == 0 && S.MemberServers.Count > 0) FillGrid(gMs, S.MemberServers); },
                 Leave = () =>
                 {
@@ -818,7 +861,32 @@ namespace LabBuilderSetup
             var t = Grid();
             nWsCount = Num(0, 20, S.WsCount);
             Row(t, "Number of test workstations", nWsCount);
-            Note(t, "Windows 11 Enterprise LTSC, domain-joined into OU=Workstations, vTPM and Secure Boot.");
+            cbWsOs = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = Px(300) };
+            foreach (var k in OsCatalog.ClientKeys) cbWsOs.Items.Add(OsCatalog.Display(k));
+            cbWsOs.SelectedItem = OsCatalog.Display(OsCatalog.ClientKeys.Contains(S.WsImage) ? S.WsImage : OsCatalog.DefaultClient);
+            Row(t, "Operating system", cbWsOs);
+            tWin10Iso = Text_(S.Win10IsoPath, 420);
+            var bIso = new Button { Text = "Browse...", AutoSize = true };
+            bIso.Click += (s, e) =>
+            {
+                using (var d = new OpenFileDialog { Filter = "ISO image (*.iso)|*.iso", Title = "Windows 10 Enterprise ISO" })
+                    if (d.ShowDialog(this) == DialogResult.OK) tWin10Iso.Text = d.FileName;
+            };
+            var isoRow = Flow(tWin10Iso, bIso);
+            Row(t, "Windows 10 ISO file", isoRow);
+            var wsOsNote = Note(t, "");
+            Action syncOs = () =>
+            {
+                bool w10 = OsCatalog.KeyOf(Convert.ToString(cbWsOs.SelectedItem)) == OsCatalog.Supplied;
+                tWin10Iso.Enabled = bIso.Enabled = w10;
+                wsOsNote.Text = w10
+                    ? "Microsoft no longer offers a Windows 10 evaluation download (end of support October 2025), so choose your own Windows 10 " +
+                      "Enterprise ISO (e.g. Enterprise LTSC 2021) on this host. It is copied into the image library once; you are responsible for its licence."
+                    : "Windows 11 Enterprise LTSC evaluation, downloaded from Microsoft.";
+                wsOsNote.Text += " All workstations are domain-joined into OU=Workstations, with vTPM and Secure Boot.";
+            };
+            cbWsOs.SelectedIndexChanged += (s, e) => syncOs();
+            syncOs();
             tWsPrefix = Text_(S.WsPrefix, 120);
             Row(t, "Computer name prefix", tWsPrefix);
             nWsOctet = Num(1, 254, S.WsFirstOctet);
@@ -835,7 +903,7 @@ namespace LabBuilderSetup
             nWsCount.ValueChanged += (s, e) => upd(); tWsPrefix.TextChanged += (s, e) => upd(); nWsOctet.ValueChanged += (s, e) => upd();
             return new Page
             {
-                Step = "Workstations", Title = "Test workstations", Subtitle = "How many and their generic size", Content = t,
+                Step = "Workstations", Title = "Test workstations", Subtitle = "How many, which operating system and their generic size", Content = t,
                 Enter = upd,
                 Leave = () =>
                 {
@@ -844,6 +912,13 @@ namespace LabBuilderSetup
                     if (first + n - 1 > 254) return Fail("Not enough addresses: first octet + count - 1 must be <= 254.", nWsOctet);
                     var used = S.AllServers.Where(x => x.HostOctet >= first && x.HostOctet <= first + n - 1).Select(x => x.Name).ToList();
                     if (used.Count > 0) return Fail("Workstation addresses overlap server " + string.Join(", ", used) + ".", nWsOctet);
+                    var wsImage = OsCatalog.KeyOf(Convert.ToString(cbWsOs.SelectedItem));
+                    if (n > 0 && wsImage == OsCatalog.Supplied)
+                    {
+                        if (!Regex.IsMatch(tWin10Iso.Text, @"^[A-Za-z]:\\.+\.iso$", RegexOptions.IgnoreCase)) return Fail("Choose your Windows 10 Enterprise ISO file (a local .iso path).", tWin10Iso);
+                        if (!File.Exists(tWin10Iso.Text)) return Fail("The Windows 10 ISO file was not found: " + tWin10Iso.Text, tWin10Iso);
+                    }
+                    S.WsImage = wsImage; S.Win10IsoPath = wsImage == OsCatalog.Supplied ? tWin10Iso.Text : "";
                     S.WsCount = n; S.WsPrefix = tWsPrefix.Text.ToUpperInvariant(); S.WsFirstOctet = first;
                     S.WsCpu = (int)nWsCpu.Value; S.WsMemoryGB = (int)nWsMem.Value; S.WsDiskGB = (int)nWsDisk.Value;
                     return true;
@@ -854,20 +929,30 @@ namespace LabBuilderSetup
         Page PageIso()
         {
             var t = Grid();
-            rDownload = new RadioButton { Text = "Download from the Microsoft Evaluation Center (Windows Server 2025 ~8.2 GB, Windows 11 Enterprise LTSC ~5.1 GB)", AutoSize = true, Checked = string.IsNullOrEmpty(S.IsoSource) };
+            rDownload = new RadioButton { Text = "Download from the Microsoft Evaluation Center", AutoSize = true, Checked = string.IsNullOrEmpty(S.IsoSource) };
             rIsoFolder = new RadioButton { Text = "Use ISOs pre-downloaded with scripts\\Get-LabIso.ps1 (folder with iso-manifest.json)", AutoSize = true, Checked = !string.IsNullOrEmpty(S.IsoSource) };
             Full(t, rDownload); Full(t, rIsoFolder);
             tIsoFolder = Text_(S.IsoSource, 420);
             Row(t, "Pre-downloaded ISO folder", WithBrowse(tIsoFolder, true));
-            Note(t, "ISOs are stored in <lab folder>\\ISO on this host, verified (HTTPS from Microsoft hosts only, size, SHA-256) " +
-                    "and reused by later builds. Downloads resume after an interruption. With the SQL Express role, the SQL Server media " +
-                    "is fetched in the same step (Microsoft web installer, signature checked) into <lab folder>\\ISO\\SQL; a pre-downloaded " +
-                    "folder can hold it in a SQL subfolder (Get-LabIso.ps1 -IncludeSql).");
+            var needed = Note(t, "");
+            Note(t, "ISOs are stored in the image library (<library>\\ISO) on this host, verified (HTTPS from Microsoft hosts only, size, " +
+                    "SHA-256) and reused by every later build and lab; ISOs already in the library are not downloaded again. Downloads " +
+                    "resume after an interruption. With the SQL Express role, the SQL Server media is fetched in the same step (Microsoft " +
+                    "web installer, signature checked) into <library>\\ISO\\SQL; a pre-downloaded folder can hold it in a SQL subfolder " +
+                    "(Get-LabIso.ps1 -IncludeSql).");
             EventHandler sync = (s, e) => { tIsoFolder.Enabled = rIsoFolder.Checked; };
             rDownload.CheckedChanged += sync; rIsoFolder.CheckedChanged += sync; sync(null, null);
+            var approxGb = new Dictionary<string, string> { { "Server2025", "~8.2 GB" }, { "Server2022", "~5.0 GB" }, { "Server2019", "~5.7 GB" }, { "Win11LTSC", "~5.1 GB" } };
             return new Page
             {
-                Step = "ISOs", Title = "Installation media", Subtitle = "Windows Server 2025 and Windows 11 Enterprise LTSC evaluation ISOs", Content = t,
+                Step = "ISOs", Title = "Installation media", Subtitle = "Evaluation ISOs of the operating systems this lab uses", Content = t,
+                Enter = () =>
+                {
+                    var lines = S.ImagesInUse.Select(k => "  - " + OsCatalog.Display(k) + (k == OsCatalog.Supplied
+                        ? ": " + S.Win10IsoPath + " (copied into the library)"
+                        : (approxGb.ContainsKey(k) ? " (" + approxGb[k] + ")" : "")));
+                    needed.Text = "This lab needs:\n" + string.Join("\n", lines.ToArray());
+                },
                 Leave = () =>
                 {
                     if (rIsoFolder.Checked)
@@ -901,10 +986,11 @@ namespace LabBuilderSetup
         string SummaryText()
         {
             var sb = new StringBuilder();
-            Func<ServerSpec, string> fmt = s => string.Format("  {0,-15} {1,-15} {2,2} vCPU {3,4} GB RAM {4,5} GB disk  {5}",
-                s.Name, S.Prefix + "." + s.HostOctet, s.Cpu, s.MemoryGB, s.DiskGB, string.Join(", ", s.Roles.Concat(s.Features)));
+            Func<ServerSpec, string> fmt = s => string.Format("  {0,-15} {6,-20} {1,-15} {2,2} vCPU {3,4} GB RAM {4,5} GB disk  {5}",
+                s.Name, S.Prefix + "." + s.HostOctet, s.Cpu, s.MemoryGB, s.DiskGB, string.Join(", ", s.Roles.Concat(s.Features)), OsCatalog.Display(s.Image));
             sb.AppendLine("Install folder      : " + S.InstallDir);
             sb.AppendLine("Lab name / folder   : " + S.LabName + "  /  " + S.LabRoot);
+            sb.AppendLine("Image library       : " + S.LibraryRoot + "  (shared by all labs)");
             sb.AppendLine("Domain              : " + S.Fqdn + "  (NetBIOS " + S.NetBios + ")");
             sb.AppendLine("Admin password      : " + (S.GeneratePassword ? "generated" : "entered by you"));
             sb.AppendLine("Network             : " + (S.SwitchType == "Private" ? "isolated (Private switch '" : "host-reachable (Internal switch '") + S.SwitchName + "'), " + S.Prefix + ".0/24");
@@ -914,7 +1000,7 @@ namespace LabBuilderSetup
             sb.AppendLine("Member servers (" + S.MemberServers.Count + "):");
             foreach (var s in S.MemberServers) sb.AppendLine(fmt(s));
             sb.AppendLine("Workstations (" + S.WsCount + "): " + (S.WsCount == 0 ? "none" :
-                string.Format("{0}01..{0}{1:D2}, {2}.{3}.., {4} vCPU, {5} GB RAM, {6} GB disk each", S.WsPrefix, S.WsCount, S.Prefix, S.WsFirstOctet, S.WsCpu, S.WsMemoryGB, S.WsDiskGB)));
+                string.Format("{7}, {0}01..{0}{1:D2}, {2}.{3}.., {4} vCPU, {5} GB RAM, {6} GB disk each", S.WsPrefix, S.WsCount, S.Prefix, S.WsFirstOctet, S.WsCpu, S.WsMemoryGB, S.WsDiskGB, OsCatalog.Display(S.WsImage))));
             sb.AppendLine();
             sb.AppendLine("Accounts            : " + S.DomainAdminCount + " domain admin(s), " + S.TestUserCount + " test user(s); test users " +
                 (S.TestUsersLocalAdmin ? "ARE" : "are not") + " local admins on workstations");
@@ -930,7 +1016,9 @@ namespace LabBuilderSetup
                     (string.IsNullOrEmpty(S.SqlDatabase) ? "; no test database" : "; database " + S.SqlDatabase + " (db_owner: " + (S.SqlDbOwnerGroups.Count > 0 ? string.Join(", ", S.SqlDbOwnerGroups) : "none") + ")") +
                     (string.IsNullOrEmpty(S.SqlCollation) ? "" : "; collation " + S.SqlCollation));
             }
-            sb.AppendLine("ISOs                : " + (string.IsNullOrEmpty(S.IsoSource) ? "download from Microsoft" : "import from " + S.IsoSource));
+            sb.AppendLine("ISOs                : " + string.Join(", ", S.ImagesInUse.Select(k => OsCatalog.Display(k)).ToArray()) + " - " +
+                (string.IsNullOrEmpty(S.IsoSource) ? "from the library, else downloaded from Microsoft" : "from the library, else imported from " + S.IsoSource) +
+                (S.ImagesInUse.Contains(OsCatalog.Supplied) ? "; Windows 10 from " + S.Win10IsoPath : ""));
             sb.AppendLine();
             var ci = new Microsoft.VisualBasic.Devices.ComputerInfo();
             double freeRam = ci.AvailablePhysicalMemory / 1073741824.0;
@@ -955,7 +1043,9 @@ namespace LabBuilderSetup
             try
             {
                 File.WriteAllText(TempConfigPath, S.ToPsd1(), Encoding.ASCII);
-                var r = PsRunner.Run(PsRunner.FileArgs(Path.Combine(toolsDir, @"scripts\Test-LabConfigFile.ps1"), "-ConfigPath", TempConfigPath), toolsDir, 120000);
+                // -OutputRoot: also check this host for another lab with the same name, lab folder or switch (Test-LabHostConflict)
+                var r = PsRunner.Run(PsRunner.FileArgs(Path.Combine(toolsDir, @"scripts\Test-LabConfigFile.ps1"), "-ConfigPath", TempConfigPath,
+                    "-OutputRoot", Path.Combine(S.InstallDir, "output")), toolsDir, 120000);
                 var errors = r.Lines.Where(l => l.StartsWith("ERROR:")).Select(l => l.Substring(6).Trim()).ToList();
                 var locale = r.Lines.Where(l => l.StartsWith("LOCALE:")).Select(l => l.Substring(7).Trim()).ToList();
                 lastValidationOutput = string.Join(Environment.NewLine, r.Lines);
@@ -970,9 +1060,11 @@ namespace LabBuilderSetup
                 else
                 {
                     lblValidation.ForeColor = Color.Firebrick;
-                    lblValidation.Height = 24 + 16 * Math.Min(6, Math.Max(1, errors.Count));
                     lblValidation.Text = "Fix these before continuing (use < Back):" + Environment.NewLine + "  - " +
                         string.Join(Environment.NewLine + "  - ", errors.Count > 0 ? errors : new List<string> { "validation failed: " + lastValidationOutput });
+                    // height from the wrapped text at the current width and display scaling (long host-conflict messages)
+                    int w = Math.Max(Px(300), lblValidation.ClientSize.Width - lblValidation.Padding.Horizontal);
+                    lblValidation.Height = Math.Min(Px(320), TextRenderer.MeasureText(lblValidation.Text, lblValidation.Font, new Size(w, 0), TextFormatFlags.WordBreak).Height + Px(12));
                 }
             }
             catch (Exception ex)
@@ -1182,7 +1274,9 @@ namespace LabBuilderSetup
 
         void RebindAll()
         {
-            tInstall.Text = S.InstallDir; tLabName.Text = S.LabName; tLabRoot.Text = S.LabRoot;
+            tInstall.Text = S.InstallDir; tLabName.Text = S.LabName; tLabRoot.Text = S.LabRoot; tLibrary.Text = S.LibraryRoot;
+            cbWsOs.SelectedItem = OsCatalog.Display(OsCatalog.ClientKeys.Contains(S.WsImage) ? S.WsImage : OsCatalog.DefaultClient);
+            tWin10Iso.Text = S.Win10IsoPath;
             tFqdn.Text = S.Fqdn; tNetBios.Text = S.NetBios; rGen.Checked = true;
             rPrivate.Checked = S.SwitchType == "Private"; rInternal.Checked = S.SwitchType == "Internal";
             tSwitch.Text = S.SwitchName; tPrefix.Text = S.Prefix;

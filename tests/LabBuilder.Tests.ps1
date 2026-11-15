@@ -31,7 +31,7 @@ Describe 'Import-LabConfig' {
         @($c.MemberServers[0].Roles).Count | Should Be 1
     }
     It 'uses Windows 11 Enterprise LTSC' {
-        (Get-ValidConfig).Iso.Images.Client.ImageNamePattern | Should Be 'Windows 11 Enterprise LTSC*'
+        (Get-ValidConfig).Iso.Images.Win11LTSC.ImageNamePattern | Should Be 'Windows 11 Enterprise LTSC*'
     }
 }
 
@@ -67,7 +67,7 @@ Describe 'BaseConfig layering (wizard configs)' {
             $c.Workstations.Count | Should Be 2
             $c.Workstations.NamePrefix | Should Be 'WS'
             @($c.Roles.IIS.Features).Count | Should Be 4
-            $c.Iso.Images.Client.Url | Should Match 'linkid=2289029'
+            $c.Iso.Images.Win11LTSC.Url | Should Match 'linkid=2289029'
             ($c.PSObject.Properties.Name -contains 'BaseConfig') | Should Be $false
             Get-Errors $c | Should Be ''
         } finally { Remove-Item -LiteralPath $dir -Recurse -Force }
@@ -88,7 +88,7 @@ Describe 'Get-LabVmDefinition' {
         $dc.IPAddress | Should Be '10.10.10.10'
         ($defs | Where-Object Name -eq 'WS01').IPAddress | Should Be '10.10.10.101'
         ($defs | Where-Object Name -eq 'WS01').DiskSizeBytes | Should Be 80GB
-        ($defs | Where-Object Name -eq 'WS01').Image | Should Be 'Client'
+        ($defs | Where-Object Name -eq 'WS01').Image | Should Be 'Win11LTSC'
     }
     It 'generates the requested number of workstations' {
         $c = Get-ValidConfig
@@ -175,7 +175,7 @@ Describe 'Test-LabConfig' {
         Get-Errors $c | Should Match 'test users must be 0-100'
     }
     It 'rejects a non-https ISO URL' {
-        $c = Get-ValidConfig; $c.Iso.Images.Server.Url = 'http://example.com/x.iso'
+        $c = Get-ValidConfig; $c.Iso.Images.Server2025.Url = 'http://example.com/x.iso'
         Get-Errors $c 'Iso' | Should Match 'https'
     }
     It 'rejects invalid additional feature names' {
@@ -352,7 +352,7 @@ Describe 'Validation check blocks' {
         $file = Join-Path $repo 'src\LabBuilder\Public\Validation.ps1'
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$null)
         $blocks = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.StringConstantType -eq 'SingleQuotedHereString' }, $true))
-        $blocks.Count | Should Be 8
+        $blocks.Count | Should Be 9
         foreach ($b in $blocks) {
             $parts = $b.Value -split "`n", 2
             $parts[0] | Should Match '^param\('
@@ -393,7 +393,7 @@ InModuleScope LabBuilder {
         It 'skips the client ISO when no workstations are configured' {
             $c = Import-LabConfig -Path (Join-Path (Split-Path -Parent (Split-Path -Parent (Get-Module LabBuilder).ModuleBase)) 'config\lab.config.example.psd1')
             $c.Workstations.Count = 0
-            @(Get-LabRequiredImageKey -Config $c) -join ',' | Should Be 'Server'
+            @(Get-LabRequiredImageKey -Config $c) -join ',' | Should Be 'Server2025'
         }
     }
 }

@@ -90,7 +90,7 @@ if (-not $dryRun) {
     Invoke-Git tag $tag | Out-Null
     Invoke-Git push -q origin $tag | Out-Null
     $notesFile = Join-Path ([IO.Path]::GetTempPath()) "LabBuilder-$tag-notes.md"
-    Set-Content -LiteralPath $notesFile -Value $notes -Encoding UTF8
+    [IO.File]::WriteAllText($notesFile, $notes, (New-Object Text.UTF8Encoding($false)))   # no BOM (PS 5.1 -Encoding UTF8 adds one; GitHub shows it)
     try {
         & gh release create $tag $exe --repo $Repository --title "LabBuilder $version" --notes-file $notesFile --latest
         if ($LASTEXITCODE -ne 0) { throw "gh release create failed ($LASTEXITCODE)." }

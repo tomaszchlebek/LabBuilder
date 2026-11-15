@@ -9,16 +9,17 @@
  │        ▼
  │  <install>\scripts\Invoke-LabBuild.ps1  ──▶ LabBuilder module (phases)
  │
- ├─ <LabRoot>\ISO           evaluation ISOs + iso-manifest.json (SHA-256)
- ├─ <LabRoot>\BaseImages    <Lab>-Server-base.vhdx, <Lab>-Client-base.vhdx (32 GB, read-only) + .json (version, language)
- ├─ <LabRoot>\VMs\<VM>      per-VM DYNAMIC VHDX (copy of base, expanded to the tester's size)
+ ├─ <Library>\ISO          image library, SHARED BY ALL LABS (ADR 0013): evaluation ISOs + iso-manifest.json (SHA-256), SQL\
+ ├─ <Library>\BaseImages   <OS>.vhdx per OS (Server2025/2022/2019, Win11LTSC, Win10; 32 GB, read-only) + .json (version, language, ISO SHA-256)
+ ├─ <LabRoot>\VMs\<VM>      per-VM DYNAMIC VHDX (copy of the base of its OS, expanded to the tester's size)
  ├─ <LabRoot>\Logs|Reports  host log, validation reports, state.json
+ ├─ <LabRoot>\lab.json      lab manifest (name, version, folders, switch, VMs + OS); VM notes "LabBuilder:<LabName> | ..."
  │
  └─ Hyper-V switch "LAB-Isolated"  (Private by default; Internal if the tester chooses)   <prefix>.0/24
-      ├─ DC01 .10  AD DS + DNS (forest root) [+ ADCS | IIS | DHCP | FileServer]
+      ├─ DC01 .10  AD DS + DNS (forest root) [+ ADCS | IIS | DHCP | FileServer]   Server 2025/2022/2019
       ├─ DC0n .1n  AD DS + DNS (additional DC, GC) [+ roles]           (1..5 DCs)
       ├─ SRVxx .2x member server [+ ADCS | IIS | DHCP | FileServer | SQL | extra features]   (0..10)
-      └─ WSnn .101.. Windows 11 Enterprise LTSC, domain member         (0..20)
+      └─ WSnn .101.. Windows 11 Enterprise LTSC or Windows 10 Enterprise (tester ISO), domain member   (0..20)
 
  Host ──PowerShell Direct (VMBus, no network)──▶ every VM
 ```
@@ -27,7 +28,8 @@ Decisions: execution [ADR 0007](adr/0007-run-directly-on-the-hyper-v-host.md), I
 base image [0004](adr/0004-vm-build-from-base-vhdx.md), dynamic disks [0008](adr/0008-per-vm-dynamic-disks.md),
 network [0005](adr/0005-isolated-private-network.md), secrets [0006](adr/0006-lab-secrets-handling.md),
 topology and roles [0009](adr/0009-tester-defined-topology-and-role-catalog.md), locale [0010](adr/0010-locale-from-hyper-v-host.md),
-wizard [0011](adr/0011-wizard-installer-exe.md).
+wizard [0011](adr/0011-wizard-installer-exe.md), SQL Server [0012](adr/0012-sql-server-express-role.md),
+image library + OS choice + lab manifest [0013](adr/0013-shared-image-library-and-os-choice.md).
 
 ## 2. Components
 
@@ -44,7 +46,8 @@ wizard [0011](adr/0011-wizard-installer-exe.md).
 | `src/LabBuilder/Public/Config.ps1` | Load (BaseConfig layering, overrides), validate, topology → VM definitions |
 | `src/LabBuilder/Public/Secrets.ps1` | Passwords, account plan (domain admins + test users), file ACL, unattend encoding |
 | `src/LabBuilder/Public/Iso.ps1`, `Private/Download.ps1` | Download, import, manifest, verification |
-| `src/LabBuilder/Public/HostSetup.ps1` | Preflight, base VHDX (+ image language), switch |
+| `src/LabBuilder/Public/HostSetup.ps1` | Preflight, base VHDX per OS in the library (+ image language, ISO hash, 1.0/1.1 adoption), switch |
+| `src/LabBuilder/Public/Library.ps1` | Image library root, host-wide named-mutex lock per item, 1.0/1.1 media migration, tester-supplied ISO import, `lab.json` manifest, VM note tag (ADR 0013) |
 | `src/LabBuilder/Public/VM.ps1`, `Private/VMHelpers.ps1` | Dynamic disk copy/resize/partition extend, unattend + locale, VM creation; PowerShell Direct helpers |
 | `src/LabBuilder/Public/Unattend.ps1` | unattend rendering, `Resolve-LabLocale` |
 | `src/LabBuilder/Public/Roles.ps1` | Forest + additional DCs, AD content, member servers, role catalog, workstations |
@@ -57,14 +60,14 @@ wizard [0011](adr/0011-wizard-installer-exe.md).
 
 | # | Phase | What it does | Idempotency check |
 |---|-------|--------------|-------------------|
-| 1 | `Preflight` | Elevation, OS ≥ 17763, Hyper-V, DISM/Storage, `bcdboot`, vTPM cmdlets, free disk, free RAM (warn) | read-only |
-| 2 | `Iso` | Import `-IsoSource`; download missing ISOs (only images in use); verify; with role SQL: SQL Express offline package via the Microsoft web installer (signature-checked) into `ISO\SQL` | manifest; `sql-media.json` + signature |
-| 3 | `BaseImages` | 32 GB GPT base VHDX from `install.wim`; record version + language | base exists |
+| 1 | `Preflight` | Elevation, OS ≥ 17763, Hyper-V, DISM/Storage, `bcdboot`, vTPM cmdlets, free disk (lab + library drive), free RAM (warn); creates lab and library folders | read-only |
+| 2 | `Iso` | Move 1.0/1.1 media from `<LabRoot>\ISO` into the library; import `-IsoSource`; download missing ISOs of the OSes in use; copy the tester's Windows 10 ISO; verify; with role SQL: SQL Express offline package via the Microsoft web installer (signature-checked) into `<Library>\ISO\SQL` — each item under a host-wide lock | manifest; `sql-media.json` + signature |
+| 3 | `BaseImages` | Per OS in use: adopt a 1.0/1.1 base of this lab, else keep the library base, else build a 32 GB GPT base VHDX from `install.wim`; record version, language, ISO SHA-256; rebuild if the ISO changed — under a host-wide lock | base exists + ISO hash |
 | 4 | `Network` | Private/Internal switch | switch exists with type |
 | 5 | `DomainControllers` | Create all DC VMs → forest root (`Install-ADDSForest`) → OUs `Lab\{Admins,Users,Groups,Servers,Workstations}`, groups, domain admins (RID 512), test users → additional DCs (`Install-ADDSDomainController`) → DNS client order → DC roles (CA first) | DomainRole ≥ 4; AD lookups; CA `Active` value |
 | 6 | `MemberServers` | Create all → per server (CA server first): IP/DNS → join `OU=Servers` → roles ADCS → DHCP → FileServer → IIS (+HTTPS) → SQL → extra features | PartOfDomain; per-role checks; SQL service exists |
 | 7 | `Workstations` | Create all → IP/DNS → join `OU=Workstations` → optional testers in local Administrators → `gpupdate` | PartOfDomain; membership |
-| 8 | `Validate` | Host: switch type, VM state, vCPU/RAM, **dynamic disk size**, adapters; DCs: domain, all DCs present, services, replication; accounts (+Domain Admins), groups, DNS; roles; workstations (LTSC, membership, local admins); SQL servers (service, TCP, firewall, edition, auth mode, sysadmins, test database); client: HTTP/HTTPS per IIS, file share read, SQL over TCP (Windows auth, sa in Mixed mode), LDAP bind of a test user and a domain admin | read-only |
+| 8 | `Validate` | Host: switch type, VM state, vCPU/RAM, **dynamic disk size**, adapters; **OS of every VM** (catalog `CaptionPattern`); DCs: domain, all DCs present, services, replication; accounts (+Domain Admins), groups, DNS; roles; workstations (LTSC, membership, local admins); SQL servers (service, TCP, firewall, edition, auth mode, sysadmins, test database); client: HTTP/HTTPS per IIS, file share read, SQL over TCP (Windows auth, sa in Mixed mode), LDAP bind of a test user and a domain admin | read-only |
 
 ## 4. Role catalog
 
@@ -82,7 +85,7 @@ wizard [0011](adr/0011-wizard-installer-exe.md).
 
 | Account | Where | Used for |
 |---------|-------|----------|
-| `<VM>\Administrator` / `<VM>\LabAdmin` | servers / Windows 11 before join | PowerShell Direct during setup |
+| `<VM>\Administrator` / `<VM>\LabAdmin` | servers / workstations (Windows 10/11) before join | PowerShell Direct during setup |
 | `<NETBIOS>\Administrator` | domain | promotion, roles, joins, validation |
 | `adm.<first>.<last>` × N | `OU=Admins`, Domain Admins | dedicated admin accounts for testers |
 | `<first>.<last>` × N | `OU=Users`, first group + random | test users |
@@ -109,4 +112,7 @@ The wizard passes an entered admin password to the build via **stdin** only (ADR
 | FR-17 | `Resolve-LabLocale`, base image language |
 | FR-18, FR-19 | `installer/` wizard, `Test-LabConfigFile.ps1`, BaseConfig layering |
 | FR-20 | `SqlServer.ps1` (`Save-LabSqlMedia`, `Install-LabSqlServer`), `Test-LabSqlConfig`, SQL checks in `Test-LabEnvironment`, wizard page SQL Server |
+| FR-21 | `Library.ps1` (`Get-LabLibraryRoot`, `Invoke-LabLibraryLock`, `Move-LabLegacyMedia`, `Import-LabSuppliedIso`), `Save-LabIso`, `New-LabBaseImage` |
+| FR-22 | OS catalog `Iso.Images`, `Get-LabVmDefinition` (Image, Kind), `Test-LabConfig`, OS check in `Test-LabEnvironment`, wizard OS columns / workstation OS |
+| FR-23 | `Write-LabManifest` (after every phase), `Get-LabVmNote` in `New-LabVM` |
 | dynamic disks (IN-6/7/12) | `New-LabVM` (copy + `Resize-VHD` + `Resize-Partition`), validation |
