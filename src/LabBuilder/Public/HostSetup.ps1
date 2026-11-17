@@ -100,7 +100,12 @@ function New-LabBaseImage {
         -ThrottleLimit (Get-LabThrottleLimit -Config $Config -Count $keys.Count -Max 2) -Sequential:(-not (Test-LabParallelEnabled -Config $Config)) `
         -Arguments @{ Config = $Config } -ScriptBlock {
             param($Item, $A)
-            Invoke-LabLibraryLock -Name "Base-$Item" -ScriptBlock { New-LabBaseImageItem -Config $A.Config -Key $Item }
+            Invoke-LabLibraryLock -Name "Base-$Item" -ScriptBlock {
+                New-LabBaseImageItem -Config $A.Config -Key $Item
+                # Windows Server: Evaluation -> Standard offline, so VMs activate with AVMA (ADR 0017). Before the role images,
+                # which are copies of this base (a new CreatedUtc makes them rebuild from the converted base).
+                Update-LabBaseImageEdition -Config $A.Config -Key $Item
+            }
         }
 
     # Role-ready images for DCs and CA servers (ADR 0016): AD DS / DNS / AD CS enabled offline in a copy of the plain base.

@@ -1,6 +1,6 @@
 # Roadmap — LabBuilder after 1.1.0
 
-- **Date:** 2026-11-17 · **Status:** in progress — 1.1.1 to 1.4.1 released; 1.4.2 built (licence check, awaiting host run) · **Current release:** 1.4.1
+- **Date:** 2026-11-17 · **Status:** in progress — 1.1.1 to 1.4.3 released · **Current release:** 1.4.3
 
 The requester's list was reordered and merged so that shared groundwork is built **once** and every later version reuses
 it. Each version ships the usual way: requirements → code + tests → docs/DEVLOG/CHANGELOG/ADR → exe rebuild → tester
@@ -175,3 +175,6 @@ first feature install. Plan:
   every boot. Requester chose the validation check only: 1.4.2 adds "Windows licence not expired" on every VM. Not planned: tester-supplied licensed Windows 11 ISO (as for
   Windows 10) with optional product key / KMS host.
 - Explicit adprep support so an additional DC may run a newer Windows Server than the forest root (today refused by Test-LabConfig).
+- **1.4.3 (released 2026-11-17 after host run nine, ADR 0017): AVMA activation** of Windows Server VMs - convert each library base image from Evaluation to retail
+  (DISM /Set-Edition, before any DC promotion: DCs cannot be converted) and install the generic AVMA key; works offline on the
+  Datacenter host. Workstations not covered (Windows client).

@@ -67,7 +67,7 @@ namespace LabBuilderSetup
         RadioButton rGen, rEnter, rPrivate, rInternal, rDownload, rIsoFolder, rLocalAdminNo, rLocalAdminYes;
         NumericUpDown nDcCount, nMsCount, nWsCount, nWsOctet, nWsCpu, nWsMem, nWsDisk, nAdmins, nUsers, nPwLen, nDhcpStart, nDhcpEnd;
         DataGridView gDc, gMs;
-        CheckBox cHttps, cConfigOnly, cParallel, cRoleImages;
+        CheckBox cHttps, cConfigOnly, cParallel, cRoleImages, cAvma;
         RadioButton rDiskDynamic, rDiskDiff;
         ListView lvPrereq, lvPhases, lvVms;
         Label lblDisk, lblValidation, lblBuildStatus;
@@ -441,6 +441,8 @@ namespace LabBuilderSetup
             Full(t, cParallel);
             cRoleImages = new CheckBox { Text = "Faster domain controllers: start them from role-ready base images (AD DS, DNS) and create the other VMs during the promotion", AutoSize = true, Checked = S.RoleImages };
             Full(t, cRoleImages);
+            cAvma = new CheckBox { Text = "Activate Windows Server VMs with AVMA (uses this Datacenter host's licence; evaluation servers stop after 10 days in an isolated lab)", AutoSize = true, Checked = S.Avma };
+            Full(t, cAvma);
             rDiskDynamic = new RadioButton { Text = "VM disks: independent dynamic copies of the base image (default)", AutoSize = true, Checked = S.DiskType != "Differencing" };
             rDiskDiff = new RadioButton { Text = "VM disks: differencing disks on the library base images (fast, small)", AutoSize = true, Checked = S.DiskType == "Differencing" };
             var diskGroup = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
@@ -477,7 +479,7 @@ namespace LabBuilderSetup
                     if (lib.StartsWith(lab, StringComparison.OrdinalIgnoreCase)) return Fail("The image library is shared by all labs - choose a folder outside the lab folder.", tLibrary);
                     S.InstallDir = tInstall.Text.TrimEnd('\\'); S.LabName = tLabName.Text; S.LabRoot = tLabRoot.Text.TrimEnd('\\');
                     S.LibraryRoot = tLibrary.Text.TrimEnd('\\');
-                    S.Parallel = cParallel.Checked; S.RoleImages = cRoleImages.Checked; S.DiskType = rDiskDiff.Checked ? "Differencing" : "Dynamic";
+                    S.Parallel = cParallel.Checked; S.RoleImages = cRoleImages.Checked; S.Avma = cAvma.Checked; S.DiskType = rDiskDiff.Checked ? "Differencing" : "Dynamic";
                     if (!CheckNewLabName()) return false;   // lab manager: unique name, <Labs folder>\<LabName> (ADR 0015)
                     return true;
                 }
@@ -1019,7 +1021,7 @@ namespace LabBuilderSetup
             sb.AppendLine("Install folder      : " + S.InstallDir);
             sb.AppendLine("Lab name / folder   : " + S.LabName + "  /  " + S.LabRoot);
             sb.AppendLine("Image library       : " + S.LibraryRoot + "  (shared by all labs)");
-            sb.AppendLine("Build               : " + (S.Parallel ? "VMs in parallel" : "one VM at a time") + (S.RoleImages ? "; role-ready images for DCs/CA" : "") + "; VM disks: " +
+            sb.AppendLine("Build               : " + (S.Parallel ? "VMs in parallel" : "one VM at a time") + (S.RoleImages ? "; role-ready images for DCs" : "") + (S.Avma ? "; servers activated with AVMA" : "") + "; VM disks: " +
                 (S.DiskType == "Differencing" ? "differencing disks on the library base images" : "independent dynamic copies"));
             sb.AppendLine("Domain              : " + S.Fqdn + "  (NetBIOS " + S.NetBios + ")");
             sb.AppendLine("Admin password      : " + (S.GeneratePassword ? "generated" : "entered by you"));
@@ -1344,7 +1346,7 @@ namespace LabBuilderSetup
         void RebindAll()
         {
             tInstall.Text = S.InstallDir; tLabName.Text = S.LabName; tLabRoot.Text = S.LabRoot; tLibrary.Text = S.LibraryRoot;
-            cParallel.Checked = S.Parallel; cRoleImages.Checked = S.RoleImages; rDiskDiff.Checked = S.DiskType == "Differencing"; rDiskDynamic.Checked = !rDiskDiff.Checked;
+            cParallel.Checked = S.Parallel; cRoleImages.Checked = S.RoleImages; cAvma.Checked = S.Avma; rDiskDiff.Checked = S.DiskType == "Differencing"; rDiskDynamic.Checked = !rDiskDiff.Checked;
             cbWsOs.SelectedItem = OsCatalog.Display(OsCatalog.ClientKeys.Contains(S.WsImage) ? S.WsImage : OsCatalog.DefaultClient);
             tWin10Iso.Text = S.Win10IsoPath;
             tFqdn.Text = S.Fqdn; tNetBios.Text = S.NetBios; rGen.Checked = true;

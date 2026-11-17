@@ -218,6 +218,20 @@ A base image that differencing disks of another lab still use is never deleted (
   A newer additional DC needs adprep against the forest root, which fails in the lab; the config check refuses such a lab. An
   existing lab with that mix cannot be repaired by editing - delete it and build it again.
 
+## 8c. Windows Server activation with AVMA (ADR 0017)
+
+- Needs an **activated Windows Server Datacenter** Hyper-V host (ITOMHV01 qualifies). AVMA runs through Hyper-V, not the network,
+  so it works in the isolated lab.
+- Phase BaseImages converts each Windows Server base image once, offline, from Evaluation to Standard (log: "Converting base image
+  ... for AVMA"; about a minute per OS). The role-ready DC images are then rebuilt from the converted base.
+- Each server VM logs "Windows activated with AVMA" after its network setup; validation shows "licensed (AVMA, renewed by the host)".
+- Warnings, build continues with evaluation servers: host not Datacenter / not activated / older than the guest; base used by
+  differencing disks ("stays an evaluation edition"); VM built from an old evaluation base ("evaluation edition ... not activated").
+- Labs built before 1.4.3 are not converted (a DC cannot be converted from Evaluation): delete and rebuild them to get activated servers.
+- Workstations (Windows 11) are not activated by AVMA.
+- Switch off: *Build options* -> clear "Activate Windows Server VMs with AVMA" (`Build.Avma = $false`).
+- Check on the host: Application log, event ID 12310 (one per AVMA request); in a VM: event ID 12309, `slmgr /dlv`.
+
 ## 9. Recording a lab run
 
 After each real build, append a DEVLOG entry (CLAUDE.md rule): date, host (OS/build), topology, ISO file names + SHA-256

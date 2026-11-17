@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [1.4.3] — 2026-11-17
+
+### Added
+- **AVMA activation of Windows Server VMs** (FR-32, ADR 0017): on an activated Windows Server Datacenter host, phase BaseImages
+  converts each Windows Server base image offline from Evaluation to Standard. Every server VM then activates with
+  Microsoft's generic AVMA key right after its network setup, before any DC promotion. This works without network access, so the
+  servers no longer stop after the evaluation's 10 days in an isolated lab. Validation shows "licensed (AVMA, renewed by the host)".
+  Option `Build.Avma` (default on; wizard *Build options*). Skipped with a warning on a host that isn't Datacenter, isn't activated or
+  is older than the guest OS, and for base images used by differencing disks. Windows 11 workstations are not covered: AVMA only
+  activates Windows Server.
+
+### Changed
+- Validation: the OS check no longer says "Evaluation" (servers are Standard after AVMA). The replication check now names the
+  partner DC, the error code, how often it failed and since when.
+
 ## [1.4.2] — 2026-11-17
 
 ### Added

@@ -99,7 +99,8 @@ return $out.ToArray()
         ("function Get-LabLicenceVerdict {`n" + ${function:Get-LabLicenceVerdict}.ToString() + "`n}")))
     foreach ($d in $defs) {
         $img = $Config.Iso.Images.($d.Image)
-        $label = [string]$img.Description -replace ' \((en-US|ISO supplied by the tester)\)$', ''
+        # No "Evaluation" in the label: AVMA converts servers to Standard (ADR 0017); the caption pattern accepts both.
+        $label = [string]$img.Description -replace ' \((en-US|ISO supplied by the tester)\)$', '' -replace ' Evaluation$', ''
         & $remote $d $osCheck @(([string]$img.CaptionPattern), $label)
     }
 
@@ -157,7 +158,9 @@ foreach ($s in @('NTDS', 'DNS', 'Netlogon', 'ADWS', 'Kdc')) {
 if ($Multi) {
     $env:ADPS_LoadDefaultDrive = 0; Import-Module ActiveDirectory -WarningAction SilentlyContinue
     $f = @(Get-ADReplicationFailure -Target $env:COMPUTERNAME -ErrorAction SilentlyContinue | Where-Object { $_.FailureCount -gt 0 })
-    & $c 'AD replication without failures' ($f.Count -eq 0) "$($f.Count) failure(s)"
+    $why = @($f | ForEach-Object { '{0}: error {1}, {2}x since {3}' -f ([string]$_.Partner -replace '^CN=NTDS Settings,CN=([^,]+),.*$', '$1'), $_.LastError, $_.FailureCount, $_.FirstFailureTime })
+    $detail = "$($f.Count) failure(s)"; if ($why.Count -gt 0) { $detail += ' - ' + ($why -join '; ') + ' (shortly after a promotion this usually clears; re-run -Phase Validate)' }
+    & $c 'AD replication without failures' ($f.Count -eq 0) $detail
 }
 return $out.ToArray()
 '@

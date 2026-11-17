@@ -120,6 +120,7 @@
         Parallel      = $true
         ThrottleLimit = 0
         RoleImages    = $true
+        Avma          = $true    # activate Windows Server VMs with AVMA (Datacenter host; ADR 0017)
     }
 
     # 1..5 domain controllers. The first creates the forest; the others join it. Roles: ADCS, IIS, DHCP, FileServer.

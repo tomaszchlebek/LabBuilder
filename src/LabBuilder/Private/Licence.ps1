@@ -30,6 +30,9 @@ function Get-LabLicenceVerdict {
         return [pscustomobject]@{ Passed = $false; Expired = $true
             Detail = "evaluation EXPIRED ($statusName) - Windows shuts this VM down every hour; use a newer evaluation ISO or a licensed ISO" }
     }
-    if ($LicenseStatus -eq 1) { return [pscustomobject]@{ Passed = $true; Expired = $false; Detail = 'licensed' } }
+    if ($LicenseStatus -eq 1) {
+        $how = 'licensed'; if ($Description -match 'VIRTUAL_MACHINE_ACTIVATION') { $how = 'licensed (AVMA, renewed by the host)' }
+        return [pscustomobject]@{ Passed = $true; Expired = $false; Detail = $how }
+    }
     return [pscustomobject]@{ Passed = $true; Expired = $false; Detail = "not activated ($statusName) - keeps running" }
 }

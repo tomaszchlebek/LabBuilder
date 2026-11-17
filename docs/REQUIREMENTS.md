@@ -75,6 +75,7 @@ also dynamically expanding, only when the tester chooses them - IN-16).
 | FR-29 | **One folder per lab** `<Labs folder>\<LabName>` with the lab's own config, VMs, logs, reports and credentials. Labs from 1.0-1.3 are registered in place; their config is restored from the old shared config/backups or rebuilt from lab.json + Hyper-V. | Must |
 | FR-30 | **Library inventory**: the wizard lists per OS the ISO and base image (build, date, ISO match, differencing users) and unknown ISO files. | Must |
 | FR-31 | **Faster domain controllers**: DCs start from a role-ready base image (AD DS + DNS enabled offline once per server OS, no sysprep - Microsoft does not support sysprep with these roles; no AD CS - a server with AD CS binaries cannot be promoted); member servers and workstations are created while the forest is promoted; automatic fallback to the plain base; can be switched off. | Should |
+| FR-32 | **Server activation (AVMA)**: on an activated Windows Server Datacenter host, Windows Server VMs are activated with AVMA (base images converted offline from Evaluation to Standard; AVMA key + activation in each VM before promotion); warning and evaluation fallback otherwise; can be switched off. Workstations are not covered. | Should |
 
 ## 4. Non-functional requirements
 

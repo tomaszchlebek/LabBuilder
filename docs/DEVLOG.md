@@ -794,3 +794,89 @@ A Windows Server evaluation starts with a 10-day period and gets its 180 days on
 (built 2026-11-14/15) will reach that point around 2026-11-24/25.
 **Next (requester):** handle the 10-day limit (e.g. validation warning with the end date in the lab summary, documented `slmgr /rearm`
 or a temporary activation route) or publish 1.4.2 as is; D4: host test for 1.4.2 passed.
+
+## 2026-11-17 — 1.4.2 published; AVMA investigated
+
+**Published:** requester "publish" after the 1.4.2 host test. Pester 104/104, commit 8d444bf, tag + release
+https://github.com/tomaszchlebek/LabBuilder/releases/tag/v1.4.2 (asset digest = local exe SHA-256 27582B...1020), exe copied to
+\itomhv01\downloads (hash verified). First attempt stopped before committing: double quotes in `-Message` break the native git
+argument line in Windows PowerShell 5.1 - use single quotes inside commit messages.
+**AVMA (requester question "can you use AVMA to license VMs?"), from Microsoft Learn (automatic-vm-activation, upgrade-conversion-
+options) and the host:**
+- Host fits: ITOMHV01 is Windows Server 2025 **Datacenter**, activated (VOLUME_MAK, status 1). A 2025 Datacenter host activates
+  Server 2025/2022/2019/2016/2012 R2 guests (all editions), **without network** (KVP / Data Exchange integration service - enabled on
+  every lab `seven` VM). Generic per-version AVMA keys are public on Microsoft Learn; `slmgr /ipk` or the unattend file.
+- Blocker: lab VMs run the **Evaluation** edition; an AVMA key needs the retail edition first: `DISM /online /Set-Edition:ServerStandard
+  /ProductKey:<key> /AcceptEula` (check `/Get-TargetEditions`; eval Datacenter -> Datacenter only). **A domain controller cannot be
+  converted** - so the conversion must happen before promotion, best once per library base image (all VMs, DCs and role images
+  inherit it).
+- Not for workstations: AVMA covers Windows Server only; Windows client evaluation cannot be converted -> workstations still need a
+  licensed ISO + key/KMS (not chosen by the requester).
+- Licensing: AVMA is proof of purchase - valid because the host's Datacenter licence covers unlimited Windows Server VMs on it.
+**Next:** requester decides whether to implement (proposal: base-image conversion to retail Standard/Datacenter + AVMA key,
+validation then shows "licensed"; existing labs: member servers convertible in place, DCs need a rebuild).
+
+## 2026-11-17 — 1.4.3: AVMA activation of Windows Server VMs (ADR 0017)
+
+**Requester:** "Yes, build AVMA". Driver: run `seven` servers have only 10 days (evaluation, no online activation in the isolated lab).
+**Host experiments first (ITOMHV01 via the connector, throwaway copies in D:\LabBuilder-Library\avma-test, removed afterwards):**
+- Server 2025 base copy: offline `DISM /Image /Get-TargetEditions` = ServerTurbine, ServerStandard, ServerDatacenter;
+  `/Set-Edition:ServerStandard /ProductKey:<2025 Standard AVMA key> /AcceptEula` -> exit 0 in 70 s, edition ServerStandard. Throwaway
+  VM (no NIC, random one-off password): "Windows Server 2025 Standard", channel VIRTUAL_MACHINE_ACTIVATION, status 5 for 3 min (no
+  automatic activation); `slmgr /ato` -> "Product activated successfully", status 1, grace 10080 min; guest event 12309 and host
+  event 12310 hr=0x00000000.
+- Server 2022 base copy: offline conversion with its AVMA key -> ServerStandard, 33 s.
+- Server 2019 base copy: offline conversion with the AVMA key -> **DISM 1168 "product key could not be validated"**; offline
+  `/Set-ProductKey` with the AVMA key -> 1168 too. With the KMS client setup key: converted; throwaway VM: `slmgr /ipk <AVMA>` +
+  `/ato` -> activated (status 1, AVMA channel).
+- All throwaway VMs and files removed (checked).
+**Implementation:**
+- `Public\Activation.ps1`: catalog (per server OS: build, edition, conversion key, AVMA key - Microsoft's public generic keys),
+  `Test-LabAvmaEnabled` (`Build.Avma`, default on), `Get-LabAvmaHostVerdict` (pure: Datacenter, activated, host build >= guest),
+  `Get-LabAvmaHostSupport`, `Update-LabBaseImageEdition` (copy -> mount under the VhdMount lock -> DISM offline Set-Edition -> replace
+  base, sidecar Edition/Activation/new CreatedUtc; skip + WARN for differencing users, unsupported host, DISM errors),
+  `Get-LabImageEdition`, `Enable-LabVMActivation` (in VM: skip evaluation / already AVMA-activated, `slmgr /ipk` + up to 4x `/ato`;
+  never throws).
+- HostSetup: conversion right after each base image (same lock), before the role images (which rebuild from the new CreatedUtc).
+- Roles: `Enable-LabVMActivation` after the network setup of the root DC, additional DCs (before promotion) and member servers.
+- Licence verdict: "licensed (AVMA, renewed by the host)". Wizard: Build options checkbox, summary line; LabModel `Build.Avma`;
+  example config. Version 1.4.3.
+- Docs: ADR 0017, REQUIREMENTS FR-32, CHANGELOG [1.4.3], RUNBOOK 8c, ARCHITECTURE, ROADMAP.
+**Verification:** Pester 113/113 (new tests/Activation.Tests.ps1: catalog covers every server OS and no client, role key mapping,
+2019 uses a different conversion key, host verdicts, option default/off, AVMA licence detail, call sites in Roles/HostSetup and order
+before role images, converted base and client OS skipped). ASCII check of src clean. Exe 1.4.3.0 built and copied to
+\itomhv01\downloads (hash verified).
+**Not verified yet (needs a lab build):** the full path inside LabBuilder - conversion of the real library bases (Server2025,
+Server2022; lab `seven` uses dynamic copies, so no differencing users block it), role image rebuild, activation of DCs before
+promotion and of member servers, validation "licensed (AVMA)".
+**Next:** tester builds a new lab with 1.4.3 (servers on 2025/2022, any workstations); then publish 1.4.3 (D4).
+
+## 2026-11-17 — 1.4.3 host run "nine": AVMA works on 2025, 2022 and 2019
+
+**Lab run (ITOMHV01, 1.4.3 exe; logs read via the Hyper-V connector):** lab `nine` - DC01 Server 2025 (ADCS), DC02 Server 2022,
+IIS01 Server 2025 (IIS), SRV02 Server 2022, SRV03 Server 2019, no workstations; previous lab `seven` deleted by the tester first.
+14:01:31 -> 14:40:13 = 38.7 min. **Validation 79 passed, 1 failed.**
+- BaseImages 9.3 min: the library bases were **converted offline** - Server2022 64 s, Server2025 2.6 min, Server2019 5.1 min (2019 waited
+  for a parallel slot); sidecars now `Edition = ServerStandard, Activation = AVMA`; both role images rebuilt from the converted bases
+  ("made from an older ... base - rebuilding").
+- **Every server activated with AVMA** after its network setup (DC01 and DC02 before promotion, then IIS01/SRV02/SRV03); validation:
+  "Windows licence not expired - licensed (AVMA, renewed by the host)" on all 5, captions "Windows Server 20xx Standard".
+- DomainControllers 20.0 min (forest promotion 14:15:39 -> ~14:22, DC02 promotion ~3.5 min, CA 3.2 min), MemberServers 8.2 min.
+**Findings:**
+1. DC01 "AD replication without failures": 1 failure, validation 13 min after DC02's promotion; the report gave only the count (DC02:
+   0 failures, HTTPS / LDAP / SQL client checks across both DCs passed). Probably transient after the promotion - not verifiable from
+   here (the lab domain is not reachable by the connectors). Change: the check now names partner, error, count and first failure time.
+2. IIS01 certificate request failed 4 times (0x80094004 CERTSRV_E_PROPERTY_EMPTY, then 0x800b0109 untrusted root) and succeeded on the
+   5th try (~3 min): the CA was installed only 5 min earlier, so the lab root was not yet trusted on IIS01. Recovered by the existing
+   retry; possible improvement: `gpupdate /force` + `certutil -pulse` on the server before the request.
+3. Cosmetic: the OS check label still said "Evaluation" - now without it.
+**Verification of the changes:** Pester 113/113; exe rebuilt and copied to \itomhv01\downloads.
+**Next:** tester re-runs `-Phase Validate` on lab `nine` to see whether the replication failure cleared (and its partner/error if not);
+then publish 1.4.3 (D4).
+
+## 2026-11-17 — Lab "nine" re-validated: 80/80; 1.4.3 published
+
+**Lab run (ITOMHV01, tester re-ran `-Phase Validate` on lab `nine`, 17:03):** **80 passed, 0 failed.** DC01 and DC02 "AD replication
+without failures: 0 failure(s)" - the 14:40 failure was transient after DC02's promotion. OS labels without "Evaluation"
+(Windows Server 2025/2022/2019 Standard), all 5 servers "licensed (AVMA, renewed by the host)".
+**Published** (D4, host test passed): see the release entry in git/GitHub (v1.4.3); ROADMAP current release 1.4.3.

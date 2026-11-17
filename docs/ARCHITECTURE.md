@@ -35,7 +35,7 @@ topology and roles [0009](adr/0009-tester-defined-topology-and-role-catalog.md),
 wizard [0011](adr/0011-wizard-installer-exe.md), SQL Server [0012](adr/0012-sql-server-express-role.md),
 image library + OS choice + lab manifest [0013](adr/0013-shared-image-library-and-os-choice.md),
 parallel build + differencing disks + progress [0014](adr/0014-parallel-build-differencing-disks-progress.md),
-lab manager [0015](adr/0015-lab-manager-folders-and-start-page.md), role-ready images [0016](adr/0016-role-ready-base-images.md).
+lab manager [0015](adr/0015-lab-manager-folders-and-start-page.md), role-ready images [0016](adr/0016-role-ready-base-images.md), AVMA activation [0017](adr/0017-avma-server-activation.md).
 
 ## 2. Components
 
@@ -51,6 +51,7 @@ lab manager [0015](adr/0015-lab-manager-folders-and-start-page.md), role-ready i
 | `scripts/Get-LabInventory.ps1` | Lab manager back end: host settings, labs, image library as JSON; save folders, register 1.0-1.3 labs, restore/rebuild a lost config (ADR 0015) |
 | `src/LabBuilder/Public/LabManager.ps1` | Host settings, `Get-LabInventory`, `Get-LabLibraryInventory`, `Get-LabOutputPath`, `Restore-LabLegacyConfig`, `New-LabConfigFromInventory`, `Remove-LabFromInventory` |
 | `src/LabBuilder/Public/RoleImages.ps1` | Role-ready base images `<OS>-Roles.vhdx` for DCs (AD DS + DNS enabled offline with DISM, no sysprep, feature set in the sidecar), fallback, removal of unconfigured AD CS before promotion (ADR 0016) |
+| `src/LabBuilder/Public/Activation.ps1` | AVMA: host check, offline edition conversion of Windows Server base images (Evaluation -> Standard, sidecar `Edition`), AVMA key + `slmgr /ato` in every server VM (ADR 0017) |
 | `installer/src/LabManagerPages.cs` | Wizard pages Folders, Start, Delete lab, Image library; edit/new mode logic |
 | `config/lab.config.example.psd1` | Schema v2 defaults (topology, roles, ISO links) |
 | `src/LabBuilder/Public/Config.ps1` | Load (BaseConfig layering, overrides), validate, topology → VM definitions |

@@ -137,6 +137,7 @@ function Install-LabDomainControllerCore {
     if (-not (Test-LabIsDomainController -VMName $vm -DomainCredential $domainCred)) {
         Wait-LabVMReady -VMName $vm -Credential $local -TimeoutMinutes $timeout | Out-Null
         Set-LabVMNetwork -VMName $vm -Credential $local -IPAddress $root.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers @($root.IPAddress)
+        Enable-LabVMActivation -Config $Config -Definition $root -Credential $local   # AVMA (ADR 0017)
 
         Write-LabLog "Promoting $($root.Name) to the first DC of new forest $fqdn ($nb) - 5 to 15 minutes ..." -Level STEP
         Write-LabProgress -Config $Config -Phase 'DomainControllers' -Item $root.Name -Status 'promoting' -Detail "new forest $fqdn"
@@ -229,6 +230,7 @@ function Install-LabDomainControllerCore {
         }
         Wait-LabVMReady -VMName $dc.VMName -Credential $local -TimeoutMinutes $timeout | Out-Null
         Set-LabVMNetwork -VMName $dc.VMName -Credential $local -IPAddress $dc.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers @($root.IPAddress)
+        Enable-LabVMActivation -Config $Config -Definition $dc -Credential $local   # AVMA (ADR 0017)
         Write-LabLog "Promoting $($dc.Name) to an additional domain controller (DNS, GC) ..." -Level STEP
         Write-LabProgress -Config $Config -Phase 'DomainControllers' -Item $dc.Name -Status 'promoting' -Detail 'additional DC'
         $null = Remove-LabUnconfiguredCa -VMName $dc.VMName -Credential $local -TimeoutMinutes $timeout
@@ -311,6 +313,7 @@ function Initialize-LabMemberServer {
         $local = Get-LabLocalCredential -Definition $s -AdminCredential $AdminCredential
         Wait-LabVMReady -VMName $s.VMName -Credential $local -TimeoutMinutes $timeout | Out-Null
         Set-LabVMNetwork -VMName $s.VMName -Credential $local -IPAddress $s.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers (Get-LabDcIPs -Config $Config)
+        Enable-LabVMActivation -Config $Config -Definition $s -Credential $local   # AVMA (ADR 0017)
         Write-LabProgress -Config $Config -Phase 'MemberServers' -Item $s.Name -Status 'joining' -Detail $fqdn
         Join-LabVMDomain -VMName $s.VMName -LocalCredential $local -DomainCredential $domainCred -DomainFqdn $fqdn `
             -OuPath (Get-LabOuPath -Config $Config -SubOu $s.OuName) -TimeoutMinutes $timeout
