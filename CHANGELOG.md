@@ -5,6 +5,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-11-17
+
+### Added
+- **Faster domain controllers** (FR-31, ADR 0016):
+  - **Role-ready base images** `<Library>\BaseImages\<OS>-Roles.vhdx`: a copy of the plain base with **AD DS and DNS** enabled
+    **offline** (DISM), built once per server OS used by a domain controller and shared by all labs. Never booted and **not
+    sysprepped** - Microsoft does not support sysprep with AD DS / AD CS installed. Domain controllers start from it; the online
+    AD DS install then takes seconds (and still adds anything missing). If the image cannot be built, a warning is logged and the
+    plain base is used as before. **AD CS is not in the image** (a server with AD CS binaries cannot be promoted - found in the
+    host test); the CA is installed online after the promotion as before.
+  - **Member-server and workstation VMs are created while the forest is promoted**, so their first boot is done when the domain is ready.
+  - Option `Build.RoleImages` (default on; wizard *Build options*: "Faster domain controllers").
+- The image library view lists the role images (current, or made from an older base / older feature set, differencing users).
+
+### Changed
+- `Remove-Lab.ps1 -IncludeLibrary` also removes the role images of the lab's operating systems (unless differencing disks use them).
+
+### Fixed
+- Before a DC promotion, AD CS binaries without a configured CA are removed (VMs created from the first 1.4.1 test image could not be
+  promoted: "Certificate Server is installed"); role images with that older feature set are rebuilt or, while in use, not used.
+- Per-VM logs no longer mix VMs when the parallel engine reuses a worker (`vm-FILE01.log` contained WS03's lines).
+- Config check: an additional domain controller may not run a newer Windows Server than DC 1 (the forest root). Promoting a Server 2025
+  DC into a forest with a Server 2022 root failed in adprep ("Adprep was unable to bind to any Domain Controller over RPC"); the wizard
+  now stops at the Summary page with "Put the newest Windows Server on DC 1", and the DC page says so.
+
 ## [1.4.0] — 2026-11-15
 
 ### Added

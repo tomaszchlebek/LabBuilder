@@ -27,6 +27,7 @@ namespace LabBuilderSetup
         public const string Supplied = "Win10";   // no Microsoft evaluation - the tester supplies the ISO
         public static string Display(string key)
         {
+            if (key != null && key.EndsWith("-Roles")) return Display(key.Substring(0, key.Length - 6)) + " - role-ready for DCs (AD DS, DNS)";
             switch (key)
             {
                 case "Server2025": return "Windows Server 2025";
@@ -84,6 +85,7 @@ namespace LabBuilderSetup
         public string ConfigPath;      // the lab's own config file (Edit), '' for a new lab
         public bool Reconstructed;     // config rebuilt from lab.json + Hyper-V: NetBIOS and roles must be confirmed
         public bool Parallel;          // Build.Parallel (ADR 0014)
+        public bool RoleImages;        // Build.RoleImages (ADR 0016)
         public string DiskType;        // Disks.Type: Dynamic | Differencing (ADR 0014, decision D5)
         public string Fqdn;
         public string NetBios;
@@ -127,7 +129,7 @@ namespace LabBuilderSetup
             LabRoot = Directory.Exists(@"D:\") ? @"D:\HyperVLab" : @"C:\HyperVLab";
             LibraryRoot = DefaultLibraryFor(LabRoot);
             WsImage = OsCatalog.DefaultClient; Win10IsoPath = "";
-            Parallel = true; DiskType = "Dynamic";
+            Parallel = true; DiskType = "Dynamic"; RoleImages = true;
             OutputPath = ""; Mode = "New"; ConfigPath = ""; Reconstructed = false;
             Fqdn = ""; NetBios = "";
             GeneratePassword = true; AdminPassword = "";
@@ -209,7 +211,7 @@ namespace LabBuilderSetup
             if (!string.IsNullOrEmpty(Win10IsoPath))
                 sb.AppendLine("    Iso     = @{ Images = @{ Win10 = @{ SourcePath = " + Q(Win10IsoPath) + " } } }");
             sb.AppendLine("    Disks   = @{ Type = " + Q(DiskType == "Differencing" ? "Differencing" : "Dynamic") + " }");
-            sb.AppendLine("    Build   = @{ Parallel = " + B(Parallel) + " }");
+            sb.AppendLine("    Build   = @{ Parallel = " + B(Parallel) + "; RoleImages = " + B(RoleImages) + " }");
             sb.AppendLine("    Domain  = @{ Fqdn = " + Q(Fqdn.ToLowerInvariant()) + "; NetBiosName = " + Q(NetBios.ToUpperInvariant()) + " }");
             sb.AppendLine("    Network = @{ SwitchName = " + Q(SwitchName) + "; SwitchType = " + Q(SwitchType) + "; Prefix = " + Q(Prefix) + " }");
             sb.AppendLine("    DomainControllers = @(");
@@ -306,6 +308,7 @@ namespace LabBuilderSetup
             s.WsImage = S(d, "Workstations.Image", OsCatalog.DefaultClient);
             s.Win10IsoPath = S(d, "Iso.Images.Win10.SourcePath", "");
             s.Parallel = Bo(d, "Build.Parallel", true);
+            s.RoleImages = Bo(d, "Build.RoleImages", true);
             s.DiskType = S(d, "Disks.Type", "Dynamic") == "Differencing" ? "Differencing" : "Dynamic";
             s.Fqdn = S(d, "Domain.Fqdn", "");
             s.NetBios = S(d, "Domain.NetBiosName", "");

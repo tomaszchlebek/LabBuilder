@@ -63,6 +63,9 @@ function Invoke-LabParallel {
             $m = Import-Module $ModulePath -PassThru -DisableNameChecking -WarningAction SilentlyContinue
             & $m {
                 param($Files, $Folder, $N)
+                # The pool reuses runspaces (module already loaded): start from a clean list, or the previous item's
+                # per-VM log would get this item's lines too (host test 2026-11-17: vm-FILE01.log contained WS03).
+                $script:LabLogFile = New-Object System.Collections.Generic.List[string]
                 foreach ($f in @($Files)) { if ($f) { Set-LabLogFile -Path $f } }
                 if ($Folder) { Set-LabLogFile -Path (Join-Path $Folder ('vm-{0}.log' -f ($N -replace '[^A-Za-z0-9_.-]', '_'))) }
                 $script:LabLogPrefix = "[$N] "

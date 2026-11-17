@@ -67,6 +67,31 @@ Describe 'Parallel engine (Invoke-LabParallel)' {
     }
 }
 
+Describe 'Per-item logs when the pool reuses a worker (host test 2026-11-17)' {
+    It 'writes each item only to its own vm-<item>.log even with fewer workers than items' {
+        $dir = Join-Path ([IO.Path]::GetTempPath()) ("reuse-{0}" -f [guid]::NewGuid())
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        try {
+            & $m { param($D)
+                Set-LabLogFile -Path (Join-Path $D 'build.log') -Clear
+                Invoke-LabParallel -Items @('A1', 'B2', 'C3', 'D4', 'E5', 'F6') -Label { param($i) $i } -ThrottleLimit 2 -LogFolder $D -ScriptBlock {
+                    param($Item, $A)
+                    Write-LabLog "work of $Item"
+                } | Out-Null
+            } $dir
+            foreach ($n in 'A1', 'B2', 'C3', 'D4', 'E5', 'F6') {
+                $lines = @(Get-Content -LiteralPath (Join-Path $dir "vm-$n.log"))
+                @($lines | Where-Object { $_ -match 'work of' }).Count | Should Be 1
+                @($lines | Where-Object { $_ -notmatch "\[$n\]" }).Count | Should Be 0
+            }
+            @(Get-Content -LiteralPath (Join-Path $dir 'build.log') | Where-Object { $_ -match 'work of' }).Count | Should Be 6
+        } finally {
+            & $m { Set-LabLogFile -Path (Join-Path $env:TEMP 'labbuilder-pester-dummy.log') -Clear }
+            Remove-Item -LiteralPath $dir -Recurse -Force
+        }
+    }
+}
+
 Describe 'Build options (Build.*, Disks.Type)' {
     It 'defaults: parallel on, auto throttle within 2..8 and never above the item count, disks Dynamic' {
         $c = Get-ValidConfig

@@ -114,9 +114,12 @@
 
     # Parallel build (ADR 0014): ISOs, base images, VM creation, member servers (after the CA) and workstations run in parallel.
     # ThrottleLimit 0 = auto (half the logical processors, 2..8). Parallel = $false runs one item at a time.
+    # RoleImages (ADR 0016): DCs and CA servers start from <OS>-Roles.vhdx (AD DS, DNS, AD CS enabled offline once per OS, no
+    # sysprep) and member servers/workstations are created while the forest is promoted. $false = plain base image only.
     Build = @{
         Parallel      = $true
         ThrottleLimit = 0
+        RoleImages    = $true
     }
 
     # 1..5 domain controllers. The first creates the forest; the others join it. Roles: ADCS, IIS, DHCP, FileServer.

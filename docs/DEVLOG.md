@@ -635,3 +635,120 @@ REQUIREMENTS v0.7 (FR-27..FR-30).
 start page with the existing labs, image library view, edit, delete). First host run of: settings file, discovery/registration of the
 1.0-1.3 labs (TESTLAB, DIFFLAB), config restore/rebuild, Edit and Delete with real VMs, library inventory.
 **Next:** publish 1.4.0 (D4); then 1.4.1 faster DC/CA (roadmap).
+
+## 2026-11-15 — Release 1.4.1: faster domain controllers and CA
+
+**Request:** roadmap 1.4.1 (requester: DC promotion and CA take too long - "for example by creating base image").
+**Research:** Microsoft's "Sysprep Support for Server Roles" lists AD CS and AD DS as **not supported** with sysprep -> the planned
+booted + sysprepped role image was replaced by an **offline** role image (DISM, never booted, no sysprep). A pre-promoted forest stays
+impossible (domain identity per lab). [ADR 0016](adr/0016-role-ready-base-images.md); REQUIREMENTS v0.8 (FR-31).
+**What:**
+- `Public/RoleImages.ps1`: `New-LabRoleBaseImageItem` (copy plain base -> mount under the VhdMount lock -> `Get-WindowsOptionalFeature -Path`
+  -> enable the AD DS / DNS / AD CS (+ tools) features that exist with `Enable-WindowsOptionalFeature -All -LimitAccess` -> dismount ->
+  read-only + sidecar with ParentCreatedUtc; kept when current, rebuilt when the plain base changed unless differencing users; any error =
+  warning + cleanup + plain base), `Get-LabRoleImageKey`, `Get-LabVmBaseImageKey`, `Test-LabRoleImagesEnabled`.
+- Phase BaseImages builds the role images after the plain bases (parallel, lock `Base-<OS>-Roles`); `New-LabVM` picks the role image for DCs
+  and AD CS servers; the online `Install-LabWindowsFeature` stays as the safety net.
+- `Install-LabDomainController` = two parallel tasks: `Install-LabDomainControllerCore` (unchanged chain) and, after the DC VMs exist, creation
+  of all member-server and workstation VMs (with parallel build + RoleImages on).
+- `-IncludeLibrary` removes role images too; library inventory + wizard library view list them ("made from the plain base image", current/older
+  base); `OsCatalog.Display` for `<OS>-Roles`. Config/wizard option `Build.RoleImages` (Build options checkbox, summary line, LabModel).
+- Version 1.4.1; RUNBOOK 8b, ARCHITECTURE, ROADMAP (deviation noted), CHANGELOG.
+**Files:** `src/LabBuilder/Public/{RoleImages,HostSetup,VM,Phase,Roles,LabManager}.ps1`, `src/LabBuilder/LabBuilder.psd1`, `config/lab.config.example.psd1`,
+`installer/src/{LabModel,WizardForm,LabManagerPages}.cs`, `tests/RoleImages.Tests.ps1` (new), docs.
+**Verification:** Pester 94/94 (6 new: role image needed for DC/ADCS OS only + option off, base choice incl. fallback when the role image is
+missing, skip without plain base, keep a current role image, rebuild-from-older-base failing cleanly without Hyper-V (no role image, no temp
+file, DC falls back), library view lists role images). The test also showed `Mount-VHD` failing non-terminating -> now `-ErrorAction Stop`.
+Exe built 1.4.1.
+**Not verified (needs the host):** the offline DISM enablement of AD DS/AD CS and the first boot of a DC/CA from the role image, the measured
+time saved, VM creation during the promotion on Hyper-V.
+**Next:** tester host run (a new small lab: 1 DC with ADCS + 1-2 members + 1 workstation, compare the DomainControllers phase time); publish.
+
+## 2026-11-17 — Analysis of the 1.4.0 host run "five" (logs in `Reports 140`, git-ignored)
+
+**Lab run (2026-11-15, ITOMHV01 Server 2025 Datacenter, 124.8 GB RAM free, LabBuilder 1.4.0):** lab `five` / five.lab in
+`D:\LabBuilder-Labs\five`, differencing disks, parallel on: DC01 (2025, ADCS), DC02 (2025), WEB01 (2019, IIS+HTTPS), FS01 (2022, File Server),
+DB01 (2025, SQL Express), WS01-03 (Win11 LTSC). **Validation 107/107 passed. Total 1 h 14 min.**
+**Timeline:** Preflight+Iso+BaseImages+Network 18 s (library reused). DomainControllers **47.2 min** (64 %): DC01 first boot 3.6 min, forest
+promotion incl. AD DS feature 12.3 min, restart 1.5 min, AD readiness wait 5.5 min, accounts 12 s, DC02 promotion 9.1 min + 1.7 min,
+DNS order 0.7 min, **CA on DC01 11.3 min** (after DC02, sequential). MemberServers **20.0 min** (only created at 20:55): FS01 3.8 min, WEB01
+6.2 min, **DB01 19.7 min = SQL media copy into the VM 5.5 min (714 MB, ~2 MB/s via PowerShell Direct) + SQL Setup 8.5 min**. Workstations
+4.9 min (first boot ~3 min). Validate 1.6 min.
+**Findings:**
+1. Phases are hard barriers: member servers and workstations wait 23 min after the domain is usable (20:32) for DC02 + CA. Only IIS HTTPS
+   needs the CA; nothing needs DC02.
+2. The CA install runs after DC02's promotion although it is on another VM (~9 min could overlap).
+3. The SQL media copy over PowerShell Direct is slow; it could be written into the VM disk while it is mounted for unattend.xml.
+4. Workstations wait for the SQL server (no dependency).
+5. 1.4.1 (built, not yet tested) covers role images (AD DS/AD CS feature time) and VM creation during the promotion; findings 1-4 are not
+   covered yet.
+6. Cosmetic: the preflight curl line always says "falls back to Invoke-WebRequest" even when curl.exe is found; the CA step has no sub-step
+   timings (11.3 min not broken down).
+**Next:** decide with the requester whether 1.4.1 also gets the pipelining (start servers/workstations when the domain is ready, CA in
+parallel with additional DCs, SQL media injected offline) before its host test.
+
+## 2026-11-17 — 1.4.1 host run "six": promotion refused (AD CS in the role image) → fixed
+
+**Lab run (ITOMHV01, 1.4.1 first build):** lab `six` - DC01 Server 2022 (ADCS), DC02 Server 2025, WEB01/DB01/FILE01 Server 2025,
+WS01-03 Win11 LTSC, differencing disks, parallel + role images. BaseImages 6.4 min: **role images built offline** - Server2022-Roles
+1.4 min, Server2025-Roles 6.4 min (features enabled: AD DS, DNS, AD CS + tools). DC01 created from Server2022-Roles, **ready in
+1.6 min** (3.6 min from the plain base in run `five`); `[other VMs]` created all 6 other VMs in 30 s during the promotion. **Failed**
+at 06:52:38: `Install-ADDSForest` - "Verification of prerequisites for Domain Controller promotion failed. **Certificate Server is
+installed.**"
+**Cause:** my design error - AD CS binaries block a DC promotion (and a CA must not change domain membership after AD CS is installed).
+**Second finding:** `vm-FILE01.log` also contained WS03's lines - the runspace pool reuses a worker whose module still had the previous
+item's per-VM log file in its list.
+**Fix:**
+- Role image = AD DS + DNS only, **DCs only**; sidecar `FeatureSet = 'ADDS-DNS/2'`; `Test-LabRoleImageCurrent` - images with another set
+  (the 1.4.1 test images) are never used for new VMs and are rebuilt when no differencing disk uses them (lab `six`'s DCs still do).
+- `Remove-LabUnconfiguredCa` before every promotion (root + additional DCs): uninstalls ADCS-Cert-Authority / AD-Certificate when no CA is
+  configured, restarts the VM -> lab `six` can be resumed.
+- `Invoke-LabParallel` worker clears the module's log list before each item.
+- Wizard option text "Faster domain controllers"; library view "role-ready for DCs (AD DS, DNS)"; ADR 0016 revision, REQUIREMENTS FR-31,
+  RUNBOOK 8b, ARCHITECTURE, CHANGELOG (1.4.1 dated 2026-11-17, Fixed section).
+**Verification:** Pester 96/96 (new/changed: no AD CS pattern in the role image; role image only for DC OSes; outdated feature set not
+used; CA member server on the plain base; feature-set-aware "current" in the library view - this test caught a missed edit; per-item log
+with 6 items on 2 workers - fails with the old code, passes now).
+**Not verified (needs the host):** resuming lab `six` (AD CS removal + restart, then promotion), DC promotion from the AD DS + DNS role
+image, the rebuilt role images.
+
+## 2026-11-17 — Lab "six" resumed: fast forest, then adprep failure → DC OS order check
+
+**Lab run (ITOMHV01, 1.4.1 fixed build, resume 07:25-07:44):** BaseImages kept the old role images (differencing disks of six-DC01/DC02
+use them, warning shown). `six-DC01: unconfigured AD CS binaries removed`, restart, then **forest created in ~2 min** (07:26:32 -> 07:28:26;
+12.3 min in run `five`), AD ready in 26 s, accounts created. DC02: AD CS removal 5.4 min, then **promotion failed 3 times** in adprep:
+"Verification of prerequisites for Active Directory preparation failed. Unable to check the specified user's group membership ... Access
+is denied. Adprep was unable to bind to any Domain Controller (DC) over Remote Procedure Call (RPC)". Phase DomainControllers failed at
+07:44:00. Per-VM logs of the new run are clean (the log-reuse fix works).
+**Cause:** DC02 runs Server 2025, the forest root DC01 Server 2022 - a newer DC needs adprep (schema 2025) against the root, which fails
+from the new DC in this setup. Not caused by the role image or the AD CS removal.
+**Fix:** `Test-LabConfig` - an additional DC may not run a newer Windows Server than DC 1 ("Put the newest Windows Server on DC 1 (the
+forest root) or use the same OS on all DCs"); wizard DC page note; CHANGELOG 1.4.1 Fixed, RUNBOOK 8b, ADR 0016 revision note.
+**Verification:** Pester 97/97 (new: newer DC rejected; older or same OS accepted). Exe rebuilt and copied to \itomhv01\downloads
+(SHA-256 verified).
+**Next:** lab `six` cannot be fixed by editing (its VMs exist): delete it and rebuild with the newest OS on DC01 (or the same OS on both
+DCs). Then the full 1.4.1 host run; publish after it passes (D4). Possible roadmap item: explicit adprep support for mixed-version DCs.
+
+## 2026-11-17 — 1.4.1 host run "seven": PASSED (107/107, 54.8 min); Win11 LTSC evaluation expired
+
+**Lab run (ITOMHV01, 1.4.1 build with the DC OS check; logs read directly over the Hyper-V connector):** lab `seven` - DC01 Server 2025
+(ADCS), DC02 Server 2022, IIS01 (IIS), SRV02 (FileServer), SRV03 (SQL) Server 2025, WS01-03 Win11 LTSC, dynamic disks, parallel + role
+images. 08:05:05 -> 08:59:52 = **54.8 min** (run `five`: 1h14m). **Validation 107 passed, 0 failed.**
+ISOs (iso-manifest.json): Server2025 26100.32230.260111 (SHA-256 7B0525...BFD51), Server2022 SHA-256 3E4FA6...55325, Win11 LTSC
+26100.1742.240906 (SHA-256 67CEC5...DA68).
+Timings:
+- BaseImages 6.1 min: old role images (with AD CS) rebuilt as ADDS-DNS/2 - Server2022-Roles 1.2 min, Server2025-Roles 6.1 min.
+- DomainControllers 33.2 min: DC01 ready 5.5 min after start (first boot of the copy), forest promotion 11.7 min (08:17:38 -> 08:29:21;
+  `six` took ~2 min on resume, so the first-boot promotion still dominates), AD ready 38 s, accounts 8 s, DC02 promotion 2.2 min,
+  **CA 9.0 min** (sequential, after DC02). The 6 other VMs were created and booted during the promotion (08:12-08:14).
+- MemberServers 13.1 min (SQL media copy 3.2 min, SQL setup 7.7 min - critical path), Workstations 0.9 min, Validate 1.1 min.
+**Finding - workstations switch themselves off:** WS01-03 shut down at 09:58:31, one hour after their last boot. Offline read of WS01's
+System log: `wlms.exe` event 1074 "The license period for this installation of Windows has expired. The operating system is shutting
+down."; SPP status 0xC004F009 (grace period expired). Same pattern in every earlier lab (TESTLAB2, two, five, six workstations: shutdown
+~60 min after boot; servers never). Cause: the **Windows 11 Enterprise LTSC evaluation build 26100.1742 (Sept 2024) has passed its
+built-in evaluation end date**; Microsoft's evaluation links (LTSC and Enterprise, fwlink 2289029/2289031) still serve that same build on
+2026-11-17. Not a LabBuilder defect; the build cannot detect it today (validation passed because it ran within the first hour).
+Not done: disabling WLMS or other licence workarounds (circumvention - out of scope).
+**Next (decision for the requester):** (a) validation check "Windows licence not expired" on every VM (SoftwareLicensingProduct) with a
+clear message; (b) let the tester supply their own licensed Windows 11 ISO (as for Windows 10, D1) plus an optional product key / KMS
+host. Then publish 1.4.1 (D4: host run passed).

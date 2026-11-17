@@ -352,6 +352,22 @@ function Test-LabConfig {
         $gnames[([string]$g.Name).ToUpperInvariant()] = $true
     }
 
+    # --- Domain controller OS order ---
+    # A DC newer than the forest root DC makes dcpromo run adprep against the root, which fails
+    # in the lab ("Adprep was unable to bind to any Domain Controller over RPC", host run six).
+    $dcs = @($defs | Where-Object { $_.Role -eq 'DomainController' })
+    if ($dcs.Count -gt 1) {
+        $rootYear = 0
+        if ([string]$dcs[0].Image -match '(\d{4})') { $rootYear = [int]$Matches[1] }
+        foreach ($dc in ($dcs | Select-Object -Skip 1)) {
+            $y = 0
+            if ([string]$dc.Image -match '(\d{4})') { $y = [int]$Matches[1] }
+            if ($rootYear -gt 0 -and $y -gt $rootYear) {
+                $errors.Add("Domain controller $($dc.Name) runs $($dc.Image), newer than the first DC $($dcs[0].Name) ($($dcs[0].Image)). Put the newest Windows Server on DC 1 (the forest root) or use the same OS on all DCs.")
+            }
+        }
+    }
+
     # --- Roles ---
     $ca = @($defs | Where-Object { $_.Roles -contains 'ADCS' })
     if ($ca.Count -gt 1) { $errors.Add("Role ADCS (Enterprise Root CA) may be on one server only (is on $(($ca | ForEach-Object Name) -join ', ')).") }

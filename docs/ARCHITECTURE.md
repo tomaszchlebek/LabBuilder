@@ -35,7 +35,7 @@ topology and roles [0009](adr/0009-tester-defined-topology-and-role-catalog.md),
 wizard [0011](adr/0011-wizard-installer-exe.md), SQL Server [0012](adr/0012-sql-server-express-role.md),
 image library + OS choice + lab manifest [0013](adr/0013-shared-image-library-and-os-choice.md),
 parallel build + differencing disks + progress [0014](adr/0014-parallel-build-differencing-disks-progress.md),
-lab manager [0015](adr/0015-lab-manager-folders-and-start-page.md).
+lab manager [0015](adr/0015-lab-manager-folders-and-start-page.md), role-ready images [0016](adr/0016-role-ready-base-images.md).
 
 ## 2. Components
 
@@ -50,6 +50,7 @@ lab manager [0015](adr/0015-lab-manager-folders-and-start-page.md).
 | `scripts/Get-LabIso.ps1`, `scripts/Remove-Lab.ps1` | Pre-download, teardown (`-LabName`: delete a lab from the inventory) |
 | `scripts/Get-LabInventory.ps1` | Lab manager back end: host settings, labs, image library as JSON; save folders, register 1.0-1.3 labs, restore/rebuild a lost config (ADR 0015) |
 | `src/LabBuilder/Public/LabManager.ps1` | Host settings, `Get-LabInventory`, `Get-LabLibraryInventory`, `Get-LabOutputPath`, `Restore-LabLegacyConfig`, `New-LabConfigFromInventory`, `Remove-LabFromInventory` |
+| `src/LabBuilder/Public/RoleImages.ps1` | Role-ready base images `<OS>-Roles.vhdx` for DCs (AD DS + DNS enabled offline with DISM, no sysprep, feature set in the sidecar), fallback, removal of unconfigured AD CS before promotion (ADR 0016) |
 | `installer/src/LabManagerPages.cs` | Wizard pages Folders, Start, Delete lab, Image library; edit/new mode logic |
 | `config/lab.config.example.psd1` | Schema v2 defaults (topology, roles, ISO links) |
 | `src/LabBuilder/Public/Config.ps1` | Load (BaseConfig layering, overrides), validate, topology → VM definitions |
@@ -129,4 +130,5 @@ The wizard passes an entered admin password to the build via **stdin** only (ADR
 | FR-25 | `Disks.Type`, `New-LabVM` (differencing branch), `Get-LabBaseImageUser` (protection in base rebuild and `Remove-LabEnvironment`), validation disk check |
 | FR-26 | `Write-LabProgress` (`progress.jsonl`, `##LBP` lines), wizard Build page VM list |
 | FR-27..FR-30 | `LabManager.ps1`, `Get-LabInventory.ps1`, `Invoke-LabBuild.ps1 -LabName`, `Remove-Lab.ps1 -LabName`, `LabManagerPages.cs`, `Paths.OutputPath` |
+| FR-31 | `RoleImages.ps1` (`New-LabRoleBaseImageItem`, `Get-LabVmBaseImageKey`), phase BaseImages, `Install-LabDomainController` (other VMs during the promotion) |
 | dynamic disks (IN-6/7/12) | `New-LabVM` (copy + `Resize-VHD` + `Resize-Partition`), validation |

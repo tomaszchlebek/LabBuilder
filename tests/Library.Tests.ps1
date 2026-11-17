@@ -38,6 +38,17 @@ Describe 'OS catalog (FR-22)' {
         $c = Get-ValidConfig; $c.Workstations.Image = 'Server2022'
         Get-Errors $c | Should Match 'needs a Client image'
     }
+    It 'rejects an additional DC with a newer Windows Server than DC 1 (adprep, host run six)' {
+        $c = Get-ValidConfig
+        $dc2 = [pscustomobject]@{ Name = 'DC02'; HostOctet = 11; ProcessorCount = 2; MemoryBytes = 4GB; DiskSizeBytes = 80GB; Roles = @(); Image = 'Server2025' }
+        $c.DomainControllers[0] | Add-Member -NotePropertyName Image -NotePropertyValue 'Server2022' -Force
+        $c.DomainControllers = @($c.DomainControllers[0], $dc2)
+        Get-Errors $c | Should Match 'Put the newest Windows Server on DC 1'
+        $c.DomainControllers[0].Image = 'Server2025'; $dc2.Image = 'Server2022'
+        Get-Errors $c | Should Not Match 'newest Windows Server'
+        $dc2.Image = 'Server2025'
+        Get-Errors $c | Should Not Match 'newest Windows Server'
+    }
     It 'requires the tester ISO for Windows 10 and checks its path' {
         $c = Get-ValidConfig; $c.Workstations.Image = 'Win10'
         Get-Errors $c | Should Match 'choose the ISO file'

@@ -1,14 +1,14 @@
 # Requirements — Build TEST environment
 
-- **Version:** 0.7 (2026-11-15)
+- **Version:** 0.8 (2026-11-15)
 - **Owner:** project requester
-- **Status:** v0.7 — v0.6 plus the lab manager: host folders, start page new/edit/delete, one folder per lab, library inventory (release 1.4.0)
+- **Status:** v0.8 — v0.7 plus faster domain controllers and CA (release 1.4.1)
 
 History: v0.1 brief · v0.2 ISOs downloaded first on the deployment machine; runs directly on any Hyper-V host ·
 v0.3 answers (Server 2025 OK, Windows 11 **LTSC**, host language/time zone, tester decides local admin + network isolation),
 tester-defined topology/roles/sizes/accounts, `.exe` wizard installer · v0.4 (1.1.0) SQL Server Express member servers with
 tester-chosen SQL options · v0.5 (1.2.0) OS per VM (Server 2019/2022/2025, Windows 11 LTSC, Windows 10 from the tester's ISO), shared image library, lab manifest · v0.6 (1.3.0) parallel build,
-differencing disks as an option, live VM progress · v0.7 (1.4.0) lab manager (ADR 0015).
+differencing disks as an option, live VM progress · v0.7 (1.4.0) lab manager (ADR 0015) · v0.8 (1.4.1) faster DC/CA (ADR 0016).
 
 ## 1. Goal
 
@@ -74,6 +74,7 @@ also dynamically expanding, only when the tester chooses them - IN-16).
 | FR-28 | **Start page**: *create a new lab*, *edit an existing lab* (its own config; name, domain and network fixed; add servers, workstations, roles; build again), *delete a lab* (preview, typed name, VMs + disks + lab files + credentials, switch if unused, never the library), *show the image library*. | Must |
 | FR-29 | **One folder per lab** `<Labs folder>\<LabName>` with the lab's own config, VMs, logs, reports and credentials. Labs from 1.0-1.3 are registered in place; their config is restored from the old shared config/backups or rebuilt from lab.json + Hyper-V. | Must |
 | FR-30 | **Library inventory**: the wizard lists per OS the ISO and base image (build, date, ISO match, differencing users) and unknown ISO files. | Must |
+| FR-31 | **Faster domain controllers**: DCs start from a role-ready base image (AD DS + DNS enabled offline once per server OS, no sysprep - Microsoft does not support sysprep with these roles; no AD CS - a server with AD CS binaries cannot be promoted); member servers and workstations are created while the forest is promoted; automatic fallback to the plain base; can be switched off. | Should |
 
 ## 4. Non-functional requirements
 
@@ -111,6 +112,7 @@ also dynamically expanding, only when the tester chooses them - IN-16).
 | SQL Server | SQL Server 2025 Express, member servers only; web installer download mode on the host, Microsoft signature check; unattended Setup from a deleted config file | [0012](adr/0012-sql-server-express-role.md) |
 | Image library / OS | Shared library folder for ISOs + base images (one per OS); OS catalog Server 2019/2022/2025, Windows 11 LTSC, Windows 10 (tester ISO); lab manifest + VM tags | [0013](adr/0013-shared-image-library-and-os-choice.md) |
 | Parallel build, disks, progress | Runspace pool engine with relayed logs and locks; differencing disks optional and library-protected; progress events (`##LBP` lines + progress.jsonl) | [0014](adr/0014-parallel-build-differencing-disks-progress.md) |
+| Faster DC / CA | Role-ready base images (AD DS + DNS) enabled offline with DISM (never booted, no sysprep), used by DCs only; other VMs created during the promotion | [0016](adr/0016-role-ready-base-images.md) |
 
 ## 7. Answered questions (v0.2 → v0.3)
 

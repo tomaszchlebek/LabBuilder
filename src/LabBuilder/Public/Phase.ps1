@@ -129,15 +129,17 @@ function Remove-LabEnvironment {
         $isoDir = Get-LabLibraryIsoFolder -Config $Config
         $cmdlet = $PSCmdlet   # inside the lock blocks $PSCmdlet would be the lock function's (WhatIf would be lost)
         foreach ($key in (Get-LabRequiredImageKey -Config $Config)) {
-            Invoke-LabLibraryLock -Name "Base-$key" -ScriptBlock {
-                $vhd = Get-LabBaseImagePath -Config $Config -Image $key
-                $users = @(Get-LabBaseImageUser -Path $vhd)   # differencing disks of other labs (this lab's VMs are gone by now)
-                if ($users.Count -gt 0) {
-                    Write-LabLog "  base image $vhd kept - differencing disks of $($users -join ', ') use it (ADR 0014)." -Level WARN
-                } elseif ((Test-Path -LiteralPath $vhd) -and $cmdlet.ShouldProcess($vhd, 'Delete base image from the shared library')) {
-                    Set-ItemProperty -LiteralPath $vhd -Name IsReadOnly -Value $false
-                    Remove-Item -LiteralPath $vhd, "$vhd.json" -Force -ErrorAction SilentlyContinue
-                    Write-LabLog "  removed base image $vhd"
+            foreach ($imageKey in @($key, "$key-Roles")) {   # plain base and its role-ready image (ADR 0016)
+                Invoke-LabLibraryLock -Name "Base-$imageKey" -ScriptBlock {
+                    $vhd = Get-LabBaseImagePath -Config $Config -Image $imageKey
+                    $users = @(Get-LabBaseImageUser -Path $vhd)   # differencing disks of other labs (this lab's VMs are gone by now)
+                    if ($users.Count -gt 0) {
+                        Write-LabLog "  base image $vhd kept - differencing disks of $($users -join ', ') use it (ADR 0014)." -Level WARN
+                    } elseif ((Test-Path -LiteralPath $vhd) -and $cmdlet.ShouldProcess($vhd, 'Delete base image from the shared library')) {
+                        Set-ItemProperty -LiteralPath $vhd -Name IsReadOnly -Value $false
+                        Remove-Item -LiteralPath $vhd, "$vhd.json" -Force -ErrorAction SilentlyContinue
+                        Write-LabLog "  removed base image $vhd"
+                    }
                 }
             }
             Invoke-LabLibraryLock -Name "Iso-$key" -ScriptBlock {

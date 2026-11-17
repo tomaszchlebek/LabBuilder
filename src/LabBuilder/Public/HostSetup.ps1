@@ -102,6 +102,17 @@ function New-LabBaseImage {
             param($Item, $A)
             Invoke-LabLibraryLock -Name "Base-$Item" -ScriptBlock { New-LabBaseImageItem -Config $A.Config -Key $Item }
         }
+
+    # Role-ready images for DCs and CA servers (ADR 0016): AD DS / DNS / AD CS enabled offline in a copy of the plain base.
+    $roleKeys = @(Get-LabRoleImageKey -Config $Config)
+    if ($roleKeys.Count -gt 0) {
+        $null = Invoke-LabParallel -Items $roleKeys -Label { param($k) "roles $k" } -What 'role images' `
+            -ThrottleLimit (Get-LabThrottleLimit -Config $Config -Count $roleKeys.Count -Max 2) -Sequential:(-not (Test-LabParallelEnabled -Config $Config)) `
+            -Arguments @{ Config = $Config } -ScriptBlock {
+                param($Item, $A)
+                Invoke-LabLibraryLock -Name "Base-$Item-Roles" -ScriptBlock { New-LabRoleBaseImageItem -Config $A.Config -Key $Item }
+            }
+    }
 }
 
 function New-LabBaseImageItem {

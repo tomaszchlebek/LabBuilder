@@ -406,9 +406,12 @@ namespace LabBuilderSetup
                     lvLibrary.Items.Clear();
                     foreach (var i in Items(lib, "Images"))
                     {
-                        string iso = Flag(i, "IsoPresent") ? Gb(i.ContainsKey("IsoBytes") ? i["IsoBytes"] : 0) + ", " + Str(i, "IsoRecorded", "").Split('T')[0]
+                        bool roleImage = Str(i, "Key", "").EndsWith("-Roles");
+                        string iso = roleImage ? "(made from the plain base image)"
+                                   : Flag(i, "IsoPresent") ? Gb(i.ContainsKey("IsoBytes") ? i["IsoBytes"] : 0) + ", " + Str(i, "IsoRecorded", "").Split('T')[0]
                                    : (Flag(i, "Supplied") ? "your ISO (not imported yet)" : "not downloaded yet");
-                        string bas = Flag(i, "BasePresent") ? ("built " + Str(i, "BaseCreated", "").Split('T')[0] + (Flag(i, "BaseCurrent") ? "" : " - older ISO")) : "not built yet";
+                        string bas = Flag(i, "BasePresent") ? ("built " + Str(i, "BaseCreated", "").Split('T')[0] +
+                                     (Flag(i, "BaseCurrent") ? "" : (roleImage ? " - older base" : " - older ISO"))) : "not built yet";
                         object u; string usedBy = "";
                         if (i.TryGetValue("UsedBy", out u) && u is IEnumerable && !(u is string)) usedBy = string.Join(", ", ((IEnumerable)u).Cast<object>().Select(x => Convert.ToString(x)).ToArray());
                         var it = new ListViewItem(new[] { OsCatalog.Display(Str(i, "Key", "")), iso, bas, Str(i, "BaseVersion", ""), usedBy });

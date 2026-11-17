@@ -1,6 +1,6 @@
 # Roadmap — LabBuilder after 1.1.0
 
-- **Date:** 2026-11-15 · **Status:** in progress — 1.1.1, 1.2.0, 1.3.0 and 1.4.0 released · **Current release:** 1.4.0
+- **Date:** 2026-11-17 · **Status:** in progress — 1.1.1 to 1.4.1 released · **Current release:** 1.4.1
 
 The requester's list was reordered and merged so that shared groundwork is built **once** and every later version reuses
 it. Each version ships the usual way: requirements → code + tests → docs/DEVLOG/CHANGELOG/ADR → exe rebuild → tester
@@ -14,7 +14,7 @@ host run → **commit, tag and GitHub release** (requester: "update github repos
 | **1.2.0** ✔ | 1.1.5 + 1.1.3 | Shared **image library** (ISOs + base images once for all labs) **and OS choice** per VM; lab manifest/tags (released 2026-11-15, ADR 0013; generic media downloader moved to 1.5.0) | Both rewrite the same image catalog and BaseImages phase; tags make 1.4.0 cheap |
 | **1.3.0** ✔ | 1.1.6 | **Parallel build** (downloads, base images, disk copies, member servers, workstations) + progress events + differencing-disk option (released 2026-11-15, ADR 0014) | Needs the final image pipeline from 1.2.0; events reused by wizard and web UI |
 | **1.3.1** | 1.1.4 | **Host compatibility** Server 2019 / 2022 / 2025 with Hyper-V; nested-virtualization option | Test hosts are built *by LabBuilder itself* (needs OS choice); tests the final parallel engine once |
-| **1.4.1** | new (2026-11-15) | **Faster domain controllers and CA**: role-ready base images (AD DS, DNS, AD CS pre-installed, sysprep `/mode:vm`) + member servers/workstations created while the forest is promoted | Needs the 1.3.0 engine and the library; small, self-contained after the 1.4.0 rework |
+| **1.4.1** | new (2026-11-15) | **Faster domain controllers and CA**: role-ready base images (AD DS + DNS enabled offline for DCs, no sysprep - ADR 0016) + member servers/workstations created while the forest is promoted; released 2026-11-17 after host run seven | Needs the 1.3.0 engine and the library; small, self-contained after the 1.4.0 rework |
 | **1.4.0** ✔ | 1.2.0 + redesign | **Lab manager**: first-run App/Labs/Library folders, start page *new / edit / delete lab*, one folder per lab under the Labs folder, library inventory, **discover** and **delete** labs (ADR 0015, decisions D6-D8; released 2026-11-15) | Uses the manifest/tags from 1.2.0; the requester's redesign (2026-11-15) is the same inventory |
 | **1.5.0** | 1.5.0 | **IT Portal injection**: import a portal package (any version), deploy to a chosen IIS member server, agent MSI to all domain computers by GPO | Reuses IIS, SQL Express (1.1.0) and lab CA certificates — mostly integration work |
 | **1.6.0** | 1.3.0 | **Exchange Server 2019 CU15 or Subscription Edition** (trial) member servers | Heaviest role; reuses media downloader (1.2.0), OS choice, parallel engine |
@@ -86,6 +86,10 @@ is the largest single role and profits from everything before it.
 - Existing labs stay in place (registered); a lost config is reconstructed from `lab.json` + Hyper-V and confirmed by the tester.
 
 ### 1.4.1 — Faster domain controllers and certificate authority (requester, 2026-11-15)
+> **Built 2026-11-15 - [ADR 0016](adr/0016-role-ready-base-images.md).** Change to the plan below: Microsoft does not support sysprep
+> with AD DS / AD CS installed, so the role image is made **offline with DISM** (copy of the plain base, features enabled, never booted,
+> no sysprep) instead of a booted + sysprepped VM. Point 2 implemented as planned; point 3 (CA in parallel with additional DCs) not done.
+
 Observed in the 1.2.0/1.3.0 host runs: forest promotion ~10 min incl. the AD DS feature install, the first boot as DC + AD readiness
 ~2-3 min, AD CS feature install + CA setup a few minutes more; fresh VMs sometimes hit "Windows servicing busy" (0x80071A2D) on the
 first feature install. Plan:
@@ -165,3 +169,9 @@ first feature install. Plan:
 - Parallel builds stress the host disk; throttling and an opt-out switch are part of 1.3.0.
 - Exchange 2019 is out of support and SE runs only as a trial — fine for labs, but it must not be presented as production guidance.
 - 2.0.0 and 3.0.0 bring Linux guests and an internet-facing service: separate threat review (ADR) before coding.
+
+### Found in host run seven (2026-11-17) - not yet scheduled
+- The Windows 11 LTSC evaluation ISO that Microsoft serves (26100.1742, Sept 2024) has expired: workstations shut down one hour after
+  every boot. Candidates: a validation check "Windows licence not expired" on every VM; tester-supplied licensed Windows 11 ISO (as for
+  Windows 10) with optional product key / KMS host.
+- Explicit adprep support so an additional DC may run a newer Windows Server than the forest root (today refused by Test-LabConfig).

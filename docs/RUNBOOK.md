@@ -201,6 +201,22 @@ A base image that differencing disks of another lab still use is never deleted (
 - **Differencing disks** (option): each VM disk is a child of `<library>\BaseImages\<OS>.vhdx`. Do not move or delete the library
   while such a lab exists; LabBuilder itself never rebuilds or deletes a base image in use (an ISO update then only warns).
 
+## 8b. Faster domain controllers (ADR 0016)
+
+- Phase BaseImages builds `<library>\BaseImages\<OS>-Roles.vhdx` once per server OS that a domain controller uses: a copy of the
+  plain base with **AD DS and DNS** enabled offline (log: "Building role-ready base image ..."). It is never booted and not
+  sysprepped (Microsoft does not support sysprep with these roles). Domain controllers start from it ("disk: ... on
+  Server2025-Roles.vhdx"); the AD DS install step then finishes in seconds. **AD CS is not in the image** - a server with AD CS
+  binaries cannot be promoted; the CA is installed online after the promotion.
+- While the forest root is promoted, the member-server and workstation VMs are created in parallel (log lines `[other VMs]`).
+- If the role image cannot be built, the log shows a warning and DCs use the plain base as before - nothing to do.
+- Labs started with the first 1.4.1 test build (role image with AD CS): just resume - the AD CS binaries are removed from the DC
+  before the promotion ("unconfigured AD CS binaries removed"), and the old role image is rebuilt once no VM uses it.
+- Switch off: *Build options* → clear "Faster domain controllers" (`Build.RoleImages = $false`).
+- **DC operating systems:** no DC may run a newer Windows Server than DC 1. Put the newest version on DC 1 (or use the same on all).
+  A newer additional DC needs adprep against the forest root, which fails in the lab; the config check refuses such a lab. An
+  existing lab with that mix cannot be repaired by editing - delete it and build it again.
+
 ## 9. Recording a lab run
 
 After each real build, append a DEVLOG entry (CLAUDE.md rule): date, host (OS/build), topology, ISO file names + SHA-256

@@ -22,3 +22,6 @@ Thumbs.db
 # Installer build output
 installer/bin/
 installer/obj/
+
+# Lab logs/reports copied from the host for analysis
+Reports */

@@ -227,6 +227,26 @@ function Get-LabLibraryInventory {
             UsedBy       = $users
         })
     }
+    # Role-ready images (ADR 0016): <OS>-Roles.vhdx next to the plain bases.
+    foreach ($p in $ordered) {
+        $vhd = Join-Path $baseDir ("{0}-Roles.vhdx" -f $p.Name)
+        if (-not (Test-Path -LiteralPath $vhd)) { continue }
+        $side = $null
+        if (Test-Path -LiteralPath "$vhd.json") { try { $side = (Get-Content -LiteralPath "$vhd.json" -Raw) | ConvertFrom-Json } catch { } }
+        $plainSide = $null
+        $plainJson = Join-Path $baseDir ("{0}.vhdx.json" -f $p.Name)
+        if (Test-Path -LiteralPath $plainJson) { try { $plainSide = (Get-Content -LiteralPath $plainJson -Raw) | ConvertFrom-Json } catch { } }
+        $users = @()
+        if (-not $NoUsers) { $users = @(Get-LabBaseImageUser -Path $vhd) }
+        $items.Add([pscustomobject]@{
+            Key = "$($p.Name)-Roles"; Description = "$($p.Value.Description) - role-ready for DCs (AD DS, DNS)"; Supplied = $false
+            IsoPresent = $false; IsoFile = ''; IsoBytes = 0; IsoSha256 = ''; IsoRecorded = ''
+            BasePresent = $true; BaseVersion = $(if ($side) { [string]$side.Version } else { '' }); BaseLanguage = $(if ($side) { [string]$side.Language } else { '' })
+            BaseCreated = $(if ($side) { [string]$side.CreatedUtc } else { '' })
+            BaseCurrent = [bool]($side -and $plainSide -and [string]$side.ParentCreatedUtc -eq [string]$plainSide.CreatedUtc -and (Test-LabRoleImageCurrent -Path $vhd))
+            UsedBy = $users
+        })
+    }
     $known = @($Catalog.PSObject.Properties | ForEach-Object { ([string]$_.Value.FileName).ToUpperInvariant() })
     $unknown = @()
     if (Test-Path -LiteralPath $isoDir) {

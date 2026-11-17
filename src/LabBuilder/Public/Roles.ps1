@@ -77,9 +77,43 @@ function Install-LabDomainController {
     .SYNOPSIS
         Phase DomainControllers: forest root DC (new forest + DNS), OUs/groups/accounts, additional DCs,
         DNS client order, then the catalog roles of each DC.
+    .DESCRIPTION
+        With the parallel build and role images on (ADR 0016), the member-server and workstation VMs are created at the same
+        time - after the DC VMs exist - so their first boot (OOBE) is finished when the domain is ready; their configuration
+        stays in their own phases.
     .PARAMETER AccountsJson
         JSON array from New-LabAccountPlan.
     #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][pscredential]$AdminCredential,
+        [Parameter(Mandatory)][string]$AccountsJson
+    )
+    $others = @(Get-LabVmDefinition -Config $Config | Where-Object { $_.Role -ne 'DomainController' })
+    if ($others.Count -eq 0 -or -not (Test-LabParallelEnabled -Config $Config) -or -not (Test-LabRoleImagesEnabled -Config $Config)) {
+        Install-LabDomainControllerCore -Config $Config -AdminCredential $AdminCredential -AccountsJson $AccountsJson
+        return
+    }
+    $dcNames = [string[]]@(Get-LabVmDefinition -Config $Config -Role DomainController | ForEach-Object VMName)
+    $null = Invoke-LabParallel -Items @('forest', 'other VMs') -Label { param($i) $i } -ThrottleLimit 2 -What 'domain tasks' `
+        -LogFolder (Join-Path ([string]$Config.Paths.LabRoot) 'Logs') `
+        -Arguments @{ Config = $Config; Cred = $AdminCredential; Accounts = $AccountsJson; Others = $others; DcNames = $dcNames } -ScriptBlock {
+            param($Item, $A)
+            if ($Item -eq 'forest') {
+                Install-LabDomainControllerCore -Config $A.Config -AdminCredential $A.Cred -AccountsJson $A.Accounts
+                return
+            }
+            # Let the DC VMs be created first (disk copies compete), then create the rest while the forest is promoted.
+            $deadline = (Get-Date).AddMinutes(30)
+            while ((Get-Date) -lt $deadline -and @($A.DcNames | Where-Object { -not (Get-VM -Name $_ -ErrorAction SilentlyContinue) }).Count -gt 0) { Start-Sleep -Seconds 10 }
+            Write-LabLog "Creating the member-server and workstation VMs while the forest is promoted (ADR 0016) ..." -Level STEP
+            New-LabVMSet -Config $A.Config -Definitions $A.Others -AdminCredential $A.Cred
+        }
+}
+
+function Install-LabDomainControllerCore {
+    # The domain controller chain itself (see Install-LabDomainController).
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Config,
@@ -106,6 +140,7 @@ function Install-LabDomainController {
 
         Write-LabLog "Promoting $($root.Name) to the first DC of new forest $fqdn ($nb) - 5 to 15 minutes ..." -Level STEP
         Write-LabProgress -Config $Config -Phase 'DomainControllers' -Item $root.Name -Status 'promoting' -Detail "new forest $fqdn"
+        $null = Remove-LabUnconfiguredCa -VMName $vm -Credential $local -TimeoutMinutes $timeout   # VMs from a 1.4.1 test role image
         $null = Install-LabWindowsFeature -VMName $vm -Credential $local -Name 'AD-Domain-Services' -TimeoutMinutes $timeout
         $res = Invoke-LabVMCommand -VMName $vm -Credential $local -ArgumentList $fqdn, $nb, $Config.Domain.DomainMode, $Config.Domain.ForestMode, $AdminCredential -ScriptBlock {
             param($Fqdn, $NetBios, $DomainMode, $ForestMode, $Cred)
@@ -196,6 +231,7 @@ function Install-LabDomainController {
         Set-LabVMNetwork -VMName $dc.VMName -Credential $local -IPAddress $dc.IPAddress -PrefixLength $Config.Network.PrefixLength -DnsServers @($root.IPAddress)
         Write-LabLog "Promoting $($dc.Name) to an additional domain controller (DNS, GC) ..." -Level STEP
         Write-LabProgress -Config $Config -Phase 'DomainControllers' -Item $dc.Name -Status 'promoting' -Detail 'additional DC'
+        $null = Remove-LabUnconfiguredCa -VMName $dc.VMName -Credential $local -TimeoutMinutes $timeout
         $null = Install-LabWindowsFeature -VMName $dc.VMName -Credential $local -Name 'AD-Domain-Services' -TimeoutMinutes $timeout
         $res = Invoke-LabVMCommand -VMName $dc.VMName -Credential $local -RetryCount 3 -RetryDelaySeconds 60 -ArgumentList $fqdn, $domainCred, $AdminCredential -ScriptBlock {
             param($Fqdn, $DomainCred, $Dsrm)

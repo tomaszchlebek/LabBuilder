@@ -26,7 +26,8 @@ function New-LabVM {
     Write-LabProgress -Config $Config -Phase $phase -Item $Definition.Name -Status 'creating' -Detail "$($Definition.Image), $($Definition.IPAddress)"
 
     $root = [string]$Config.Paths.LabRoot
-    $base = Get-LabBaseImagePath -Config $Config -Image $Definition.Image
+    # DCs and CA servers start from the role-ready image when it exists (ADR 0016), everything else from the plain base.
+    $base = Get-LabBaseImagePath -Config $Config -Image (Get-LabVmBaseImageKey -Config $Config -Definition $Definition)
     if (-not (Test-Path -LiteralPath $base)) { throw "Base image missing: $base - run phase BaseImages." }
     if (-not (Get-VMSwitch -Name $Config.Network.SwitchName -ErrorAction SilentlyContinue)) { throw "Switch $($Config.Network.SwitchName) missing - run phase Network." }
 
