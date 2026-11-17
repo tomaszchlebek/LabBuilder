@@ -752,3 +752,45 @@ Not done: disabling WLMS or other licence workarounds (circumvention - out of sc
 **Next (decision for the requester):** (a) validation check "Windows licence not expired" on every VM (SoftwareLicensingProduct) with a
 clear message; (b) let the tester supply their own licensed Windows 11 ISO (as for Windows 10, D1) plus an optional product key / KMS
 host. Then publish 1.4.1 (D4: host run passed).
+
+## 2026-11-17 — 1.4.1 published
+
+Requester: "Publish 1.4.1 now" (host run `seven` passed, D4). `scripts\Publish-LabRelease.ps1`: Pester 97/97, exe rebuilt (SHA-256
+A1B9E97E9D16F0501FEF53A757AC71200A36893947E78F5122F55A9A5446428F), commit 21a5f5e, tag and release
+https://github.com/tomaszchlebek/LabBuilder/releases/tag/v1.4.1 (asset digest matches). ROADMAP: current release 1.4.1; the expired
+Win11 LTSC evaluation and adprep support listed as unscheduled findings. Copy to \itomhv01\downloads failed: the file is open on the
+host (the wizard is running) - the share still holds this morning's build (same code, older embedded docs).
+**Next:** requester decides on the Windows licence handling (validation check / tester-supplied Windows 11 ISO + key).
+
+## 2026-11-17 — 1.4.2: validation check "Windows licence not expired"
+
+**Why:** host run `seven` - Microsoft's Windows 11 LTSC evaluation ISO 26100.1742 is expired; workstations shut down (wlms.exe) one
+hour after every boot, yet validation passed because it ran within that hour. Requester chose: validation check only (no
+tester-supplied Windows 11 ISO, no licence workaround).
+**What:**
+- `Private\Licence.ps1` `Get-LabLicenceVerdict` (pure; injected as text into the in-VM block): evaluation = description
+  `TIMEBASED_EVAL` or WLMS service present; evaluation passes only with status licensed/grace and time left (detail "evaluation, N
+  day(s) left (until date)"), else fails "evaluation EXPIRED ... shuts this VM down every hour". Non-evaluation: "licensed" or "not
+  activated ... keeps running" (pass).
+- `Test-LabEnvironment`: the OS check of every VM also queries `SoftwareLicensingProduct` (Windows application ID, installed key) and
+  adds "Windows licence not expired"; an unreadable state fails with the error text.
+- Version 1.4.2; CHANGELOG [1.4.2]; REQUIREMENTS FR-12; RUNBOOK troubleshooting row; ROADMAP status.
+**Verification:** Pester 104/104 (new tests/Licence.Tests.ps1: expired eval fails, eval with no time fails, running eval shows days,
+WLMS alone = eval, licensed / unactivated non-eval pass, function self-contained, injected into the OS check). Real CIM query run on
+ITOMHV01 via the connector: Server 2025 Datacenter VOLUME_MAK, status 1 -> "licensed". The query was not run inside a lab VM (the
+connector account cannot use the lab admin credential, and must not); the expired case is backed by WS01's offline event log
+(SPP 0xC004F009, wlms event 1074). Exe 1.4.2.0 built and copied to \itomhv01\downloads (SHA-256 2C9193...0171 verified).
+**Next:** host test - start seven-WS01..03 and run `-Phase Validate` on lab `seven` (expected: "Windows licence not expired" fails on
+the workstations, passes on the servers with days left); then publish 1.4.2 (D4).
+
+## 2026-11-17 — 1.4.2 host test on lab "seven": licence check works; servers have only 10 days
+
+**Lab run (ITOMHV01, 1.4.2 exe, tester re-ran MemberServers/Workstations/Validate on lab `seven` with WS01-03 started; 11:03):**
+validation **112 passed, 3 failed** - the 3 failures are exactly the expected ones: "Windows licence not expired" on WS01-03
+("evaluation EXPIRED (notification) ..."). All other checks passed, the 8 new licence checks ran in every VM (PowerShell Direct).
+**Finding:** every server (Server 2025 and 2022 evaluation, installed today) reports "evaluation, 9 day(s) left (until 2026-11-27)".
+A Windows Server evaluation starts with a 10-day period and gets its 180 days only after online activation; the lab is isolated
+(Private switch), so it never activates. Consequence: after ~10 days the lab servers will also shut down every hour. Earlier labs
+(built 2026-11-14/15) will reach that point around 2026-11-24/25.
+**Next (requester):** handle the 10-day limit (e.g. validation warning with the end date in the lab summary, documented `slmgr /rearm`
+or a temporary activation route) or publish 1.4.2 as is; D4: host test for 1.4.2 passed.

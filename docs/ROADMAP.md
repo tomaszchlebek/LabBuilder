@@ -1,6 +1,6 @@
 # Roadmap — LabBuilder after 1.1.0
 
-- **Date:** 2026-11-17 · **Status:** in progress — 1.1.1 to 1.4.1 released · **Current release:** 1.4.1
+- **Date:** 2026-11-17 · **Status:** in progress — 1.1.1 to 1.4.1 released; 1.4.2 built (licence check, awaiting host run) · **Current release:** 1.4.1
 
 The requester's list was reordered and merged so that shared groundwork is built **once** and every later version reuses
 it. Each version ships the usual way: requirements → code + tests → docs/DEVLOG/CHANGELOG/ADR → exe rebuild → tester
@@ -172,6 +172,6 @@ first feature install. Plan:
 
 ### Found in host run seven (2026-11-17) - not yet scheduled
 - The Windows 11 LTSC evaluation ISO that Microsoft serves (26100.1742, Sept 2024) has expired: workstations shut down one hour after
-  every boot. Candidates: a validation check "Windows licence not expired" on every VM; tester-supplied licensed Windows 11 ISO (as for
+  every boot. Requester chose the validation check only: 1.4.2 adds "Windows licence not expired" on every VM. Not planned: tester-supplied licensed Windows 11 ISO (as for
   Windows 10) with optional product key / KMS host.
 - Explicit adprep support so an additional DC may run a newer Windows Server than the forest root (today refused by Test-LabConfig).

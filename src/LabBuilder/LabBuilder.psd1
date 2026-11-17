@@ -1,6 +1,6 @@
 @{
     RootModule        = 'LabBuilder.psm1'
-    ModuleVersion     = '1.4.1'
+    ModuleVersion     = '1.4.2'
     GUID              = '5d0f7f0e-3c9a-4d0b-9a57-2f1d8f6b4c21'
     Author            = 'Build TEST environment project'
     Description       = 'Builds an isolated Hyper-V lab from Microsoft evaluation ISOs: AD forest with 1-5 DCs, Enterprise Root CA, member servers with selectable roles (IIS, ADCS, DHCP, File Server) and Windows 11 LTSC workstations.'

@@ -55,7 +55,7 @@ also dynamically expanding, only when the tester chooses them - IN-16).
 | FR-9 | Deploy the tester-chosen **member servers**, domain-joined, each with the **roles the tester selects** (catalog: IIS, AD CS, DHCP, File Server, plus any extra Windows feature names). | Must |
 | FR-10 | IIS serves HTTPS with a certificate from the lab CA when a CA is deployed. | Should |
 | FR-11 | After the servers, deploy the tester-chosen number of **domain-joined workstations** (Windows 11 LTSC or Windows 10) with the chosen generic size. | Must |
-| FR-12 | Validation checks after the build with a report (DCs/replication, CA, accounts, groups, each role, workstations, web/file access, isolation). | Must |
+| FR-12 | Validation checks after the build with a report (DCs/replication, CA, accounts, groups, each role, workstations, web/file access, isolation, Windows licence of every VM not expired - 1.4.2). | Must |
 | FR-13 | Give the tester the lab credentials (admin + generated accounts) in a local, protected, git-ignored folder. | Must |
 | FR-14 | Builds can be re-run/resumed (idempotent phases) and run phase by phase. | Must |
 | FR-15 | Tear down the lab, keeping the shared image library (ISOs, base images) unless explicitly asked. | Should |

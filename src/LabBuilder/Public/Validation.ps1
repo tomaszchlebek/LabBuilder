@@ -81,12 +81,22 @@ function Test-LabEnvironment {
     }
 
     # --- Operating system of every VM (FR-22, ADR 0013) ---
-    $osCheck = & $newCheck @'
+    $osText = @'
 param($Pattern, $Label)
 $os = Get-CimInstance Win32_OperatingSystem
 & $c "OS is $Label" ($os.Caption -like $Pattern) "$($os.Caption) $($os.BuildNumber)"
+# Windows licence (host run seven): an expired evaluation shuts the VM down every hour (wlms.exe).
+__LICENCE_FUNCTION__
+try {
+    $p = @(Get-CimInstance -ClassName SoftwareLicensingProduct -Filter "ApplicationID='55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL" -ErrorAction Stop) | Select-Object -First 1
+    $wlms = [bool](Get-Service -Name WLMS -ErrorAction SilentlyContinue)
+    $r = Get-LabLicenceVerdict -LicenseStatus ([int]$p.LicenseStatus) -GraceMinutes ([int64]$p.GracePeriodRemaining) -Description ([string]$p.Description) -HasWlms $wlms -Now (Get-Date)
+    & $c 'Windows licence not expired' $r.Passed $r.Detail
+} catch { & $c 'Windows licence not expired' $false ("licence state unreadable: " + $_.Exception.Message) }
 return $out.ToArray()
 '@
+    $osCheck = & $newCheck ($osText.Replace('__LICENCE_FUNCTION__',
+        ("function Get-LabLicenceVerdict {`n" + ${function:Get-LabLicenceVerdict}.ToString() + "`n}")))
     foreach ($d in $defs) {
         $img = $Config.Iso.Images.($d.Image)
         $label = [string]$img.Description -replace ' \((en-US|ISO supplied by the tester)\)$', ''

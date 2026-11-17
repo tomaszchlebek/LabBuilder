@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [1.4.2] — 2026-11-17
+
+### Added
+- Validation check **"Windows licence not expired"** on every VM. An expired Windows evaluation now fails validation with a clear
+  message instead of the VM switching itself off an hour after every boot (wlms.exe). Microsoft's current Windows 11 Enterprise LTSC
+  evaluation ISO (build 26100.1742, Sept 2024) is expired, so this check fails for its workstations. Running evaluations show the
+  days left; licensed installs, and non-evaluation installs that aren't activated, pass.
+
 ## [1.4.1] — 2026-11-17
 
 ### Added

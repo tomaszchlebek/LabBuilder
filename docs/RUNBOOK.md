@@ -165,6 +165,7 @@ Lab administrator password: `(Import-Clixml .\output\TESTLAB\lab-admin.cred.xml)
 | Base image wrong edition | Adjust `ImageNamePattern`, delete `<library>\BaseImages\<OS>.vhdx` (+ `.json`), rebuild. |
 | "No image matching 'Windows 10 Enterprise*'" | Your Windows 10 ISO has no Enterprise edition (e.g. a consumer Home/Pro ISO) — use an Enterprise or Enterprise LTSC ISO. |
 | "another LabBuilder build is preparing library item ..." | A second build on the host is downloading/building the same ISO or base image; this one waits and then reuses it. |
+| Validation "Windows licence not expired" fails / workstations switch off about an hour after every start | The Windows evaluation in that ISO has run out (event 1074 from `wlms.exe`: "The license period for this installation of Windows has expired"). Microsoft's Windows 11 Enterprise LTSC evaluation ISO 26100.1742 is expired. Start the VM again when needed (it runs about an hour each time), or rebuild the workstations from a newer evaluation or a licensed ISO. LabBuilder doesn't disable the licence shutdown. |
 | Validation "OS is Windows Server 20xx" fails | The VM was built from another image (e.g. a 1.1 lab with the OS changed later) — remove that VM and build again. |
 | Changed VM sizes after a build | Existing VMs are not resized; remove the lab (or the VM) and build again. |
 | SQL media download fails (phase Iso) | Read the error; download the package by hand (§4 "ISO links") into `<library>\ISO\SQL` and re-run. A file not signed by Microsoft is refused. |
